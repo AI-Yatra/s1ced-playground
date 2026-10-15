@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "s1ced"
+version = "1.0.0"
+description = "S1-CED decision model and playground: calibrated yes/no, choice and score decisions on CPU"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Syed Azeez" }]
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.4",
+    "tokenizers>=0.19",
+    "safetensors>=0.4",
+    "numpy>=1.24",
+    "huggingface_hub>=0.24",
+]
+keywords = ["decision model", "calibration", "conformal prediction", "classification", "playground"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/AI-Yatra/s1ced-playground"
+Model = "https://huggingface.co/syedazeez/s1ced-v3-deep"
+
+[project.scripts]
+s1ced-playground = "s1ced.playground:main"
+s1ced = "s1ced.infer:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/s1ced"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/s1ced", "tests", "README.md", "LICENSE"]
+
+# `uv run` inside a clone: CPU-only torch on Windows and Linux (macOS wheels are CPU/MPS already).
+# Users with a GPU can drop this block or install torch themselves.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

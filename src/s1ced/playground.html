@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S1-CED decision playground</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='3' width='28' height='28' fill='%23f2879f'/%3E%3Crect x='1' y='1' width='28' height='28' fill='%23fbfaf8' stroke='%231b1718' stroke-width='2'/%3E%3Crect x='1' y='1' width='28' height='7' fill='%231b1718'/%3E%3Crect x='23' y='3' width='3' height='3' fill='%23f2879f'/%3E%3Crect x='6' y='12' width='19' height='4' fill='%231b1718'/%3E%3Crect x='6' y='18' width='11' height='4' fill='%23f2879f' stroke='%231b1718' stroke-width='1'/%3E%3Crect x='6' y='24' width='5' height='2' fill='%231b1718'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --ink: #1b1718; --paper: #fbfaf8; --win: #ececea; --line: #1b1718; --soft: #c9c6c2; --muted: #6f6a66;
+    --pink: #f2879f; --pink-soft: #fbd9e1; --blue: #8fb8d8; --good: #1f8a5b; --warn: #b8660b; --bad: #c62f4a;
+    --mono: "IBM Plex Mono", "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+    --sans: "Neue Haas Grotesk Text", "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { margin: 0; color: var(--ink); font: 14px/1.4 var(--sans); overflow: hidden;
+    background: var(--paper) radial-gradient(circle, rgba(27, 23, 24, .13) 1px, transparent 1.2px) 0 0 / 7px 7px; }
+  body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: 220px; z-index: -1; pointer-events: none;
+    background: radial-gradient(60% 120% at 12% 0, rgba(242, 135, 159, .55), transparent 70%), radial-gradient(50% 110% at 88% 0, rgba(143, 184, 216, .6), transparent 70%); }
+  .app { height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
+
+  /* top bar */
+  .top { display: flex; align-items: center; gap: 10px; padding: 10px 14px 8px; }
+  .brand { font-weight: 700; font-size: 20px; letter-spacing: -.03em; background: #fff; border: 1px solid var(--line); padding: 1px 8px; }
+  .brand small { font: 12px var(--mono); letter-spacing: 0; margin-left: 6px; color: var(--muted); font-weight: 400; }
+  .top .sp { flex: 1; }
+  .chipbtn { font: 13px var(--sans); background: #fff; border: 1px solid var(--line); padding: 3px 9px; cursor: pointer; color: var(--ink); }
+  .chipbtn.dark { background: var(--ink); color: #fff; }
+  .status { font: 11.5px var(--mono); background: #fff; border: 1px solid var(--line); padding: 3px 8px; display: flex; gap: 6px; align-items: center; }
+  .dot { width: 8px; height: 8px; display: inline-block; background: var(--soft); }
+  .dot.on { background: var(--good); } .dot.warn { background: var(--warn); } .dot.off { background: var(--bad); }
+
+  /* windows */
+  .desk { display: grid; grid-template-columns: 236px minmax(380px, 1fr) minmax(400px, 1.1fr); gap: 12px; padding: 0 14px 10px; min-height: 0; }
+  .win { background: var(--win); border: 1px solid var(--line); box-shadow: 3px 3px 0 var(--ink); display: flex; flex-direction: column; min-height: 0; }
+  .tb { background: var(--ink); color: #fff; font: 12px var(--mono); padding: 3px 8px; display: flex; align-items: center; gap: 8px; flex: none; }
+  .tb .t { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb .seg { display: flex; }
+  .tb .seg button { font: 11px var(--mono); background: transparent; color: #bdb8b4; border: 1px solid #5a5455; padding: 0 7px; cursor: pointer; margin-left: -1px; }
+  .tb .seg button.on { background: #fff; color: var(--ink); border-color: #fff; }
+  .body { padding: 10px; overflow: auto; min-height: 0; flex: 1; }
+  .body.flex { display: flex; flex-direction: column; gap: 8px; }
+  .sect { font: 11px var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 2px 0 5px; display: flex; align-items: center; gap: 6px; }
+  .sect .r { margin-left: auto; text-transform: none; letter-spacing: 0; }
+
+  /* left: model + scenarios */
+  .pick { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+  .pick button { text-align: left; background: #fff; border: 1px solid var(--line); padding: 6px 8px; cursor: pointer; font: 13px var(--sans); color: var(--ink); display: grid; gap: 1px; }
+  .pick button small { font: 11px var(--mono); color: var(--muted); }
+  .pick button.on { background: var(--ink); color: #fff; } .pick button.on small { color: #cfcac6; }
+  .scen button { width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px dashed var(--soft); padding: 6px 2px; cursor: pointer; font: 13px var(--sans); color: var(--ink); display: flex; gap: 7px; align-items: center; }
+  .scen button:hover { background: rgba(255, 255, 255, .6); }
+  .scen button.on { background: #fff; font-weight: 600; }
+  .scen button.grp { font: 11px var(--mono); text-transform: uppercase; letter-spacing: .07em; color: var(--muted); border-bottom: 1px solid var(--soft); padding: 7px 2px 5px; }
+  .scen button.grp.open { color: var(--ink); }
+  .scen button.grp .car { width: 14px; height: 14px; border: 1px solid currentColor; display: inline-grid; place-items: center; font-size: 11px; line-height: 1; flex: none; }
+  .scen button.grp .cnt { margin-left: auto; font-size: 10.5px; }
+  .inv { font: 10.5px var(--mono); background: var(--ink); color: #fff; padding: 0 5px; line-height: 16px; flex: none; }
+  .inv.pink { background: var(--pink); color: var(--ink); }
+  .keybox { margin-top: 12px; background: #fff; border: 1px solid var(--line); padding: 8px; font: 12px var(--mono); }
+  .keybox .k { word-break: break-all; margin: 3px 0 7px; }
+  .note { font: 11.5px/1.45 var(--mono); color: var(--muted); margin-top: 10px; }
+
+  /* inputs */
+  textarea, input[type=text], input[type=password], input[type=number], select {
+    width: 100%; background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 0; padding: 5px 7px; font: 12.5px/1.4 var(--mono); }
+  textarea { resize: none; }
+  textarea:focus, input:focus, select:focus { outline: 2px solid var(--pink); outline-offset: -1px; }
+  #state { flex: 1 1 120px; min-height: 90px; }
+  .qtabs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .qtabs button { background: #fff; border: 1px solid var(--line); padding: 2px 7px 2px 3px; cursor: pointer; font: 12.5px var(--mono); color: var(--ink); display: flex; gap: 6px; align-items: center; }
+  .qtabs button.on { box-shadow: inset 0 -3px 0 var(--pink); font-weight: 600; }
+  .qtabs .plus { padding: 2px 8px; border-style: dashed; }
+  .editor { background: #fff; border: 1px solid var(--line); padding: 8px; display: grid; gap: 6px; flex: none; }
+  .r3 { display: grid; grid-template-columns: 1fr 96px 26px; gap: 6px; }
+  .r2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .lab { font: 10.5px var(--mono); text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-bottom: 2px; }
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 6px; }
+  .opts.levels { grid-template-columns: 1fr; }
+  .orow { display: grid; grid-template-columns: 22px 1fr 22px; align-items: center; border: 1px solid var(--line); background: #fff; }
+  .orow > span { font: 11px var(--mono); text-align: center; color: var(--muted); }
+  .orow input { border: 0; padding: 3px 5px; }
+  .orow input.d { color: var(--muted); border-top: 1px dashed var(--soft); grid-column: 2; }
+  .orow.choice { grid-template-rows: auto auto; }
+  .orow.choice > span { grid-row: 1 / 3; } .orow.choice > .x { grid-row: 1 / 3; grid-column: 3; }
+  .x { background: transparent; border: 0; color: var(--muted); cursor: pointer; font: 13px var(--mono); padding: 0; height: 100%; }
+  .x:hover { color: var(--bad); }
+  .addrow { font: 12px var(--mono); background: transparent; border: 1px dashed var(--muted); color: var(--muted); padding: 3px 6px; cursor: pointer; }
+  .gate { display: grid; grid-template-columns: auto 62px 1fr 1fr; gap: 6px; align-items: center; font: 11.5px var(--mono); color: var(--muted); }
+  .runbar { display: flex; gap: 10px; align-items: center; flex: none; flex-wrap: wrap; }
+  .run { background: var(--ink); color: #fff; border: 1px solid var(--ink); padding: 7px 18px; font: 600 14px var(--sans); cursor: pointer; box-shadow: 3px 3px 0 var(--pink); }
+  .run:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--pink); }
+  .run:disabled { opacity: .55; cursor: wait; }
+  .check { display: flex; gap: 5px; align-items: center; font: 11.5px var(--mono); color: var(--muted); cursor: pointer; }
+  .kbd { font: 11px var(--mono); color: var(--muted); margin-left: auto; }
+  .err { color: var(--bad); font: 12px var(--mono); white-space: pre-wrap; }
+  #json { flex: 1; }
+
+  /* results */
+  .empty { height: 100%; display: grid; place-items: center; text-align: center; color: var(--muted); font: 12.5px var(--mono); }
+  .empty b { display: block; font: 700 30px/1.05 var(--sans); letter-spacing: -.03em; color: var(--ink); margin-bottom: 8px; }
+  .legend { display: grid; gap: 4px; margin-bottom: 8px; }
+  .lg { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); background: #fff; border: 1px solid var(--line); padding: 4px 7px; }
+  .sw { width: 12px; height: 12px; border: 1px solid var(--ink); flex: none; }
+  .sw.local { background: var(--ink); } .sw.remote { background: var(--pink); }
+  .lg .m { color: var(--muted); margin-left: auto; text-align: right; }
+  .lg.err { color: var(--bad); }
+  .qres { background: #fff; border: 1px solid var(--line); margin-bottom: 8px; }
+  .qhead { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-bottom: 1px solid var(--soft); flex-wrap: wrap; }
+  .qhead .id { font: 600 13px var(--mono); }
+  .qhead .txt { color: var(--muted); font-size: 12.5px; flex: 1; min-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .flag { font: 600 11px var(--mono); padding: 1px 6px; border: 1px solid; }
+  .flag.agree { color: var(--good); } .flag.differ { color: #fff; background: var(--bad); border-color: var(--bad); }
+  .rows { padding: 5px 8px 6px; display: grid; gap: 3px; }
+  .orr { display: grid; align-items: center; gap: 8px; font: 12.5px var(--mono); }
+  .orr .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .orr.lead .nm { font-weight: 600; }
+  .cell { display: grid; grid-template-columns: 1fr 46px; gap: 6px; align-items: center; }
+  .cell .p { text-align: right; font-variant-numeric: tabular-nums; }
+  .cell .p.best { font-weight: 700; }
+  .track { height: 9px; border: 1px solid var(--ink); background: #fff radial-gradient(circle, rgba(27, 23, 24, .25) .6px, transparent .8px) 0 0 / 3px 3px; position: relative; }
+  .track i { position: absolute; inset: 0 auto 0 0; background: var(--ink); }
+  .track.remote i { background: var(--pink); border-right: 1px solid var(--ink); }
+  .track b { position: absolute; top: -3px; width: 1px; height: 13px; background: var(--bad); }
+  .colhead { font: 10.5px var(--mono); text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .verd { display: flex; gap: 6px; flex-wrap: wrap; padding: 5px 8px 7px; border-top: 1px dashed var(--soft); align-items: center; }
+  .tag { font: 11px var(--mono); border: 1px solid var(--ink); padding: 0 6px; line-height: 18px; display: inline-flex; gap: 5px; align-items: center; }
+  .tag.pass { background: var(--ink); color: #fff; }
+  .tag.fail { background: #fff; color: var(--warn); border-color: var(--warn); }
+  .tag.who { border: 0; padding: 0; color: var(--muted); }
+  .tag.hit { color: var(--good); border-color: var(--good); }
+  .tag.miss { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .exp { font: 10px var(--mono); border: 1px dashed var(--ink); padding: 0 3px; margin-left: 5px; }
+  .score { font: 600 12px var(--mono); padding: 1px 6px; border: 1px solid var(--ink); background: #fff; }
+  .warns { font: 11.5px var(--mono); color: var(--warn); margin: 0 0 8px; padding-left: 16px; }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.45 var(--mono); background: #fff; border: 1px solid var(--line); padding: 8px; }
+  .colerr { color: var(--bad); font: 12px var(--mono); }
+
+  /* status bar */
+  .bar { font: 11px var(--mono); color: var(--muted); padding: 0 14px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* key dialog */
+  dialog { padding: 0; border: 1px solid var(--line); box-shadow: 5px 5px 0 var(--ink); width: min(460px, 92vw); background: var(--win); color: var(--ink); }
+  dialog::backdrop { background: rgba(251, 250, 248, .55); backdrop-filter: blur(2px); }
+  dialog .body { display: grid; gap: 8px; }
+  dialog h3 { margin: 0; font: 700 22px/1.1 var(--sans); letter-spacing: -.03em; }
+  dialog p { margin: 0; font-size: 13px; color: #3d3839; }
+  dialog .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  /* tutorial */
+  .tour { position: fixed; z-index: 50; width: 380px; max-width: calc(100vw - 28px); background: #fff; border: 1px solid var(--line); box-shadow: 5px 5px 0 var(--pink); }
+  .tour .body { display: grid; gap: 8px; }
+  .tour h4 { margin: 0; font: 700 19px/1.15 var(--sans); letter-spacing: -.02em; }
+  .tour p { margin: 0; font-size: 13.5px; line-height: 1.5; }
+  .tour p code, .tour p b.k { font: 12px var(--mono); background: var(--win); padding: 0 4px; }
+  .tour .nav { display: flex; gap: 8px; align-items: center; }
+  .tour .nav .n { font: 11px var(--mono); color: var(--muted); margin-right: auto; }
+  .tour .prog { height: 4px; background: var(--win); } .tour .prog i { display: block; height: 100%; background: var(--pink); }
+  .spot { outline: 3px solid var(--pink) !important; outline-offset: 2px; animation: spot 1.4s ease-in-out infinite; position: relative; z-index: 5; }
+  @keyframes spot { 50% { outline-color: var(--ink); } }
+  @media (max-width: 1100px) { body { overflow: auto; } .app { height: auto; } .desk { grid-template-columns: 1fr; } .win { max-height: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <span class="brand">S1-CED Playground<small>v1.0</small></span>
+    <span class="sp"></span>
+    <button class="chipbtn dark" id="tourBtn" title="Step-by-step guide using the resume examples">Tutorial</button>
+    <span class="status" id="localStatus"><i class="dot"></i>local: loading</span>
+  </div>
+
+  <div class="desk">
+    <!-- left: model and scenarios -->
+    <div class="win">
+      <div class="tb"><span class="t">Model 1.0</span></div>
+      <div class="body">
+        <div class="pick" id="target">
+          <button data-t="local" class="on">Local model<small>loading model details</small></button>
+          <button data-t="remote">Remote model<small>needs key</small></button>
+          <button data-t="both">Compare both<small>same request, side by side</small></button>
+        </div>
+        <div class="sect">Scenarios</div>
+        <div class="scen" id="presets"></div>
+        <div class="err" id="examplesErr" role="status"></div>
+        <div class="keybox">
+          <div class="sect" style="margin:0">OpenRouter key</div>
+          <div class="k" id="keyText">not set</div>
+          <button class="chipbtn" id="keyBtn">Add key</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- middle: input -->
+    <div class="win">
+      <div class="tb"><span class="t" id="inTitle">Input</span>
+        <span class="seg" id="mode"><button data-m="form" class="on">Form</button><button data-m="json">JSON</button></span></div>
+      <div class="body flex" id="formView">
+        <div class="sect">State <span class="r">text, or JSON object</span></div>
+        <textarea id="state" spellcheck="false"></textarea>
+        <div class="sect" style="margin-top:4px">Questions</div>
+        <div class="qtabs" id="qtabs"></div>
+        <div class="editor" id="editor"></div>
+        <div class="runbar" id="formRunbar">
+          <button class="run" id="run">Run decision</button>
+          <label class="check" id="criteriaControl" title="Appends descriptions to the local question"><input type="checkbox" id="inclCrit">criteria text to local</label>
+          <span class="kbd">Ctrl+Enter</span>
+        </div>
+        <div class="err" id="inErr"></div>
+      </div>
+      <div class="body flex" id="jsonView" hidden>
+        <div class="sect">Request JSON <span class="r">model is set per target</span></div>
+        <textarea id="json" spellcheck="false"></textarea>
+        <div class="runbar" id="jsonRunbar"><button class="run" id="run2">Run decision</button><span class="kbd">Ctrl+Enter</span></div>
+        <div class="err" id="inErr2"></div>
+      </div>
+    </div>
+
+    <!-- right: result -->
+    <div class="win">
+      <div class="tb"><span class="t">Decision</span>
+        <span class="seg" id="outMode"><button data-o="preview" class="on">Preview</button><button data-o="json">JSON</button></span></div>
+      <div class="body" id="out"><div class="empty"><div><b>Ask a question.<br>Get a probability.</b>Pick a scenario, then Run decision.</div></div></div>
+    </div>
+  </div>
+  <div class="bar" id="statusBar">Local confidence = top probability. Calibrated weights also provide prediction sets. Compare probabilities across models; confidence measures can differ.</div>
+</div>
+
+<div class="tour" id="tour" hidden role="dialog" aria-labelledby="tourTitle">
+  <div class="tb"><span class="t" id="tourBar">Tutorial</span><button class="x" id="tourX" style="color:#fff" title="Close tutorial">x</button></div>
+  <div class="prog"><i id="tourProg"></i></div>
+  <div class="body">
+    <h4 id="tourTitle"></h4>
+    <p id="tourText"></p>
+    <div class="nav"><span class="n" id="tourN"></span>
+      <button class="chipbtn" id="tourBack">Back</button><button class="chipbtn dark" id="tourNext">Next</button></div>
+  </div>
+</div>
+
+<dialog id="keyDlg">
+  <div class="tb"><span class="t">OpenRouter key 1.0</span><button class="x" id="keyX" style="color:#fff" title="Close">x</button></div>
+  <form class="body" id="keyForm">
+    <h3 id="keyHeading">Connect remote model</h3>
+    <p id="keyIntro"></p>
+    <div class="lab" id="keyCurrent"></div>
+    <input type="password" id="keyIn" placeholder="sk-or-v1-..." autocomplete="off" spellcheck="false">
+    <label class="check"><input type="checkbox" id="keyRemember">Remember on this computer (encrypted for your Windows user)</label>
+    <div class="err" id="keyErr"></div>
+    <div class="acts">
+      <button type="button" class="chipbtn" id="keyForget" hidden>Forget saved key</button>
+      <button type="button" class="chipbtn" id="keyCancel">Cancel</button>
+      <button type="submit" class="chipbtn dark" id="keySave">Save key</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const pct = x => (x == null ? '-' : (x * 100).toFixed(1) + '%');
+const textOf = v => v == null ? '' : (typeof v === 'string' ? v : JSON.stringify(v, null, 1));
+const parseLoose = s => { const t = s.trim(); if (/^[\[{]/.test(t)) { try { return JSON.parse(t); } catch (_) {} } return s; };
+const clone = o => JSON.parse(JSON.stringify(o));
+
+// ---------------- scenarios ----------------
+const PRESETS = [
+  {name: 'Agent guardrail', tag: 'noul', req: {
+    state: 'Task: clean up inactive accounts before the quarterly report.\nProposed tool call: delete_rows(table="customers", where="last_login < 2023-01-01")\nContext: the customers table has 48,210 rows and no backup was taken today.',
+    questions: {safe_to_run: {type: 'noul', instructions: 'Is this action safe to run without a human approving it first?',
+      criteria: {true: 'Reversible or low-impact, and clearly within the stated task.', false: 'Destructive, irreversible, or broader than the task requires.'}}}},
+    gates: {safe_to_run: {threshold: 0.8, pass: 'Auto-execute', fail: 'Ask a human'}}},
+  {name: 'Support routing', tag: 'choice', req: {
+    state: 'Customer: I was charged twice for my March invoice and the second charge is still pending on my card. Can you refund it?',
+    questions: {department: {type: 'choice', instructions: 'Which team should handle this ticket?',
+      criteria: {billing: 'Charges, invoices, refunds, payment problems', technical: 'Bugs, errors, outages, integrations',
+                 shipping: 'Delivery status, delays, lost packages', sales: 'Plans, upgrades, quotes'}}}},
+    gates: {department: {threshold: 0.7, pass: 'Route', fail: 'Triage queue'}}},
+  {name: 'Lead qualification', tag: 'score', req: {
+    state: 'Inbound form: "We are a 400-person logistics company evaluating tools to automate invoice matching. Budget is approved for Q1 and I lead the finance ops team. Can we get a demo next week?"',
+    questions: {lead_quality: {type: 'score', instructions: 'How sales-ready is this lead?',
+      criteria: ['No fit or no buying intent', 'Some fit, early research only', 'Clear fit and interest, budget or timing unclear', 'Clear fit, budget, authority and near-term timing']}}},
+    gates: {lead_quality: {threshold: 0.6, pass: 'Use selected level', fail: 'Review lead'}}},
+  {name: 'Policy rule (verqen)', tag: 'choice', req: {
+    state: 'Policy:\n1. Block the shipment if the destination status is listed as embargoed.\n2. In cases where the item classification is listed as military, staff must apply for an export licence.\n3. Apply for an export licence if the item classification is listed as dual-use and destination status equals neutral.\n4. If the recorded shipment value is in excess of $100,000, send it for trade compliance review.\nCheck the rules in order and apply the first one that matches. If none matches, clear it for export.\n\nCase:\nDestination status: neutral.\nAccording to the log, the shipment value stands at $99,700.00.\nIt is recorded that the item classification is EAR99.',
+    questions: {action: {type: 'choice', instructions: 'Which action does the policy require?',
+      criteria: {clear_for_export: null, block_shipment: null, trade_compliance_review: null, apply_for_export_licence: null, confirm_end_user: null}}}},
+    gates: {action: {threshold: 0.7, pass: 'Apply', fail: 'Compliance review'}}},
+  {name: 'Ticket triage, all types', tag: 'mixed', req: {
+    state: {ticket: {channel: 'email', customer_tier: 'enterprise', messages: [
+      {from: 'customer', text: 'Our whole team has been locked out of the dashboard since this morning. We have a board demo in two hours. This is the third outage this month.'}]}},
+    questions: {
+      is_urgent: {type: 'noul', instructions: 'Does `ticket.messages[0].text` need a response within the hour?', criteria: {true: 'Explicitly time-sensitive or blocking', false: 'Can wait for the normal queue'}},
+      team: {type: 'choice', instructions: 'Which team should own this ticket?', criteria: {technical: 'Outages, login and access problems', billing: 'Charges and invoices', account_management: 'Relationship, renewals, complaints about service quality'}},
+      frustration: {type: 'score', instructions: 'How frustrated is the customer?', criteria: ['Calm', 'Mildly annoyed', 'Frustrated', 'Very angry']}}},
+    gates: {is_urgent: {threshold: 0.8, pass: 'Page on-call', fail: 'Normal queue'}}},
+];
+const DEFAULT_GATE = t => t === 'noul' ? {threshold: 0.8, pass: 'Act', fail: 'Review'} : {threshold: 0.7, pass: 'Act', fail: 'Review'};
+const TARGETS = {local: 'Local model', remote: 'Remote model', both: 'Compare both'};
+
+let doc = null, gates = {}, sel = null, expected = {}, lastExpected = {}, curPreset = -1;
+const EMPTY_OUT = $('#out').innerHTML;
+let target = 'local', mode = 'form', outMode = 'preview', lastOut = null, lastReq = null, health = null, pendingRun = false;
+let running = false, revision = 0, lastGates = {};
+function invalidateResults() { revision++; pendingRun = false; lastOut = null; $('#out').innerHTML = EMPTY_OUT; }
+const gateFor = (id, type, source = gates) => Object.hasOwn(source, id) ? source[id] : DEFAULT_GATE(type);
+const validThreshold = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
+
+// scenario groups fold like an accordion: only the open group lists its items
+let openGroup = 'Basics';
+function renderPresets() {
+  const groups = [];
+  PRESETS.forEach((p, i) => { const g = p.group || 'Basics'; let e = groups.find(x => x.name === g); if (!e) groups.push(e = {name: g, note: p.groupNote, items: []}); e.items.push(i); });
+  $('#presets').innerHTML = groups.map(g => {
+    const open = g.name === openGroup;
+    return `<button class="grp ${open ? 'open' : ''}" data-g="${esc(g.name)}" title="${esc(g.note || '')}" aria-expanded="${open}"><span class="car">${open ? '-' : '+'}</span>${esc(g.name)}<span class="cnt">${g.items.length}</span></button>` +
+      (open ? g.items.map(i => `<button data-i="${i}" class="${i === curPreset ? 'on' : ''}"><span class="inv">${esc(PRESETS[i].tag)}</span>${esc(PRESETS[i].name)}</button>`).join('') : '');
+  }).join('');
+}
+const expOk = (val, exp) => Array.isArray(exp) ? exp.includes(val) : val === exp;
+const expLabel = exp => Array.isArray(exp) ? exp.join(' or ') : String(exp);
+async function loadExamples() {
+  // extra scenarios from examples.json (or --examples): each group shares its questions; items carry expected answers
+  try {
+    const ex = await api('/api/examples');
+    for (const g of ex.groups || []) for (const it of g.items || [])
+      PRESETS.push({name: it.name, tag: 'mixed', group: g.name, groupNote: g.note, req: {state: it.state, questions: clone(g.questions)}, gates: g.gates, expected: it.expected});
+    renderPresets();
+  } catch (e) { $('#examplesErr').textContent = 'Examples could not load: ' + e.message; }
+}
+renderPresets();
+$('#presets').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.g != null) { openGroup = openGroup === b.dataset.g ? null : b.dataset.g; renderPresets(); }
+  else loadPreset(+b.dataset.i);
+};
+function loadPreset(i) {
+  const p = PRESETS[i]; doc = clone(p.req); gates = clone(p.gates || {}); expected = clone(p.expected || {});
+  curPreset = i; openGroup = p.group || 'Basics'; renderPresets();
+  invalidateResults();
+  for (const [id, q] of Object.entries(doc.questions)) gates[id] = gateFor(id, q.type);
+  sel = Object.keys(doc.questions)[0];
+  document.querySelectorAll('#presets button').forEach(b => b.classList.toggle('on', +b.dataset.i === i));
+  $('#state').value = textOf(doc.state); $('#json').value = JSON.stringify(doc, null, 2);
+  $('#inErr').textContent = $('#inErr2').textContent = ''; renderTabs(); renderEditor();
+}
+
+// ---------------- question tabs + editor (doc is the source of truth) ----------------
+function renderTabs() {
+  $('#qtabs').innerHTML = Object.entries(doc.questions).map(([id, q]) =>
+    `<button data-id="${esc(id)}" class="${id === sel ? 'on' : ''}"><span class="inv ${id === sel ? 'pink' : ''}">${esc(q.type)}</span>${esc(id)}</button>`).join('') +
+    '<button class="plus" id="addQ" title="Add question">+</button>';
+}
+function renderEditor() {
+  const q = doc.questions[sel]; if (!q) { $('#editor').innerHTML = '<div class="lab">No questions. Add one with +.</div>'; return; }
+  const g = gateFor(sel, q.type); let crit;
+  if (q.type === 'noul') {
+    const c = q.criteria || {};
+    crit = `<div class="r2"><div><div class="lab">True when</div><input type="text" data-k="true" value="${esc(textOf(c.true))}"></div>
+            <div><div class="lab">False when</div><input type="text" data-k="false" value="${esc(textOf(c.false))}"></div></div>`;
+  } else if (q.type === 'choice') {
+    crit = `<div class="lab">Options <span style="text-transform:none">(name, optional description)</span></div><div class="opts">` +
+      Object.entries(q.criteria || {}).map(([k, v], i) => `<div class="orow choice"><span>${i + 1}</span><input type="text" data-on value="${esc(k)}"><input type="text" class="d" data-od value="${esc(textOf(v))}" placeholder="description"><button class="x" data-del="${i}" title="Remove">x</button></div>`).join('') +
+      `<button class="addrow" data-add>+ option</button></div>`;
+  } else {
+    crit = `<div class="lab">Levels, lowest first</div><div class="opts levels">` +
+      (q.criteria || []).map((v, i) => `<div class="orow"><span>${i}</span><input type="text" data-lv value="${esc(textOf(v))}"><button class="x" data-del="${i}" title="Remove">x</button></div>`).join('') +
+      `<button class="addrow" data-add>+ level</button></div>`;
+  }
+  $('#editor').innerHTML = `
+    <div class="r3"><input type="text" id="qid" value="${esc(sel)}" title="Question id: returned with the answer, never sent to the model">
+      <select id="qtype">${['noul', 'choice', 'score'].map(t => `<option ${t === q.type ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <button class="x" id="delQ" title="Delete question">x</button></div>
+    <div><div class="lab">Question</div><input type="text" id="qinstr" value="${esc(textOf(q.instructions))}"></div>
+    ${crit}
+    <div class="gate"><span>${q.type === 'noul' ? 'act if p(yes) &ge;' : 'act if confidence &ge;'}</span>
+      <input type="number" id="gth" min="0" max="1" step="0.05" value="${esc(g.threshold)}">
+      <input type="text" id="gpass" value="${esc(g.pass)}" title="Label when it passes"><input type="text" id="gfail" value="${esc(g.fail)}" title="Label otherwise"></div>`;
+}
+function readEditor() {
+  const q = doc.questions[sel]; if (!q) return;
+  q.instructions = parseLoose($('#qinstr').value);
+  if (q.type === 'noul') {
+    const t = $('#editor [data-k=true]').value.trim(), f = $('#editor [data-k=false]').value.trim();
+    if (t || f) q.criteria = {true: t, false: f}; else delete q.criteria;
+  } else if (q.type === 'choice') {
+    const c = Object.create(null); document.querySelectorAll('#editor .orow').forEach(r => { const k = r.querySelector('[data-on]').value.trim(); const d = r.querySelector('[data-od]').value.trim(); if (k) c[k] = d ? parseLoose(d) : null; });
+    q.criteria = c;
+  } else {
+    q.criteria = [...document.querySelectorAll('#editor [data-lv]')].map(i => i.value.trim()).filter(Boolean);
+  }
+  const rawThreshold = $('#gth').value;
+  const threshold = rawThreshold.trim() === '' ? null : Number(rawThreshold);
+  $('#gth').setCustomValidity(validThreshold(threshold) ? '' : 'Enter a threshold between 0 and 1.');
+  gates[sel] = {threshold, pass: $('#gpass').value, fail: $('#gfail').value};
+}
+$('#editor').addEventListener('input', e => { if (e.target.id !== 'qid') readEditor(); });
+$('#editor').addEventListener('change', e => {
+  if (e.target.id === 'qid') {
+    const nid = e.target.value.trim();
+    if (!nid || (nid !== sel && Object.hasOwn(doc.questions, nid))) { e.target.value = sel; $('#inErr').textContent = nid ? `Question id "${nid}" already exists.` : 'Question id cannot be empty.'; return; }
+    doc.questions = Object.fromEntries(Object.entries(doc.questions).map(([k, v]) => [k === sel ? nid : k, v]));
+    if (nid !== sel) {
+      gates = Object.fromEntries(Object.entries(gates).map(([k,v]) => [k === sel ? nid : k, v]));
+      expected = Object.fromEntries(Object.entries(expected).map(([k,v]) => [k === sel ? nid : k, v]));
+      invalidateResults();
+    } sel = nid; $('#inErr').textContent = ''; renderTabs();
+  } else if (e.target.id === 'qtype') {
+    const q = doc.questions[sel]; q.type = e.target.value; delete expected[sel]; invalidateResults();
+    q.criteria = q.type === 'noul' ? {true: '', false: ''} : q.type === 'choice' ? {yes: null, no: null} : ['Low', 'Medium', 'High'];
+    gates[sel] = DEFAULT_GATE(q.type); renderTabs(); renderEditor();
+  }
+});
+$('#editor').addEventListener('click', e => {
+  const q = doc.questions[sel];
+  if (e.target.id === 'delQ') {
+    const ids = Object.keys(doc.questions); const i = ids.indexOf(sel); delete doc.questions[sel]; delete gates[sel]; delete expected[sel]; invalidateResults();
+    sel = Object.keys(doc.questions)[Math.max(0, i - 1)] || null; renderTabs(); renderEditor();
+  } else if (e.target.dataset.del != null) {
+    delete expected[sel]; invalidateResults();
+    e.target.closest('.orow').remove(); readEditor(); renderEditor();
+  } else if (e.target.dataset.add != null) {
+    delete expected[sel]; invalidateResults();
+    readEditor();
+    if (q.type === 'choice') { let n = Object.keys(q.criteria).length + 1; while (q.criteria['option_' + n] !== undefined) n++; q.criteria['option_' + n] = null; }
+    else q.criteria.push(`Level ${q.criteria.length}`);
+    renderEditor(); const ins = document.querySelectorAll('#editor [data-on], #editor [data-lv]'); ins[ins.length - 1]?.select();
+  }
+});
+$('#qtabs').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.id === 'addQ') {
+    invalidateResults();
+    let n = Object.keys(doc.questions).length + 1; while (doc.questions['question_' + n]) n++;
+    sel = 'question_' + n; doc.questions[sel] = {type: 'noul', instructions: '', criteria: {true: '', false: ''}}; gates[sel] = DEFAULT_GATE('noul');
+  } else sel = b.dataset.id;
+  renderTabs(); renderEditor(); if (b.id === 'addQ') $('#qinstr').focus();
+};
+$('#state').addEventListener('input', () => { doc.state = parseLoose($('#state').value); });
+
+document.addEventListener('input', e => {
+  if (e.target.id === 'state' || e.target.id === 'json') { expected = {}; invalidateResults(); }
+  else if (e.target.id === 'inclCrit') invalidateResults();
+  else if (e.target.closest && e.target.closest('#editor') && e.target.id !== 'qid') {
+    if (['gth','gpass','gfail'].includes(e.target.id)) {
+      if (lastOut) { lastGates = clone(gates); if (validThreshold(gateFor(sel, doc.questions[sel].type).threshold)) renderOut(); else invalidateResults(); }
+      if (running) invalidateResults();
+    } else { delete expected[sel]; invalidateResults(); }
+  }
+});
+
+// ---------------- modes ----------------
+function placeCriteriaControl() {
+  const bar = $(mode === 'form' ? '#formRunbar' : '#jsonRunbar');
+  bar.insertBefore($('#criteriaControl'), bar.querySelector('.kbd'));
+}
+function currentRequest() {
+  let r;
+  if (mode === 'json') {
+    try { r = JSON.parse($('#json').value); } catch (e) { throw new Error('Request JSON does not parse: ' + e.message); }
+  } else r = clone(doc);
+  if (!r || Array.isArray(r) || typeof r !== 'object' || !r.questions || Array.isArray(r.questions) || typeof r.questions !== 'object') throw new Error('Request JSON needs a questions object.');
+  if (!Object.keys(r.questions).length) throw new Error('Add at least one question.');
+  for (const [id, q] of Object.entries(r.questions)) {
+    if (!q || Array.isArray(q) || typeof q !== 'object') throw new Error(`${id}: question must be an object.`);
+    q.type ??= 'choice';
+    if (!['choice','noul','score'].includes(q.type)) throw new Error(`${id}: unknown question type ${q.type}.`);
+    if (q.type === 'choice' && (!q.criteria || Array.isArray(q.criteria) || typeof q.criteria !== 'object' || Object.keys(q.criteria).length < 2)) throw new Error(`${id}: choice needs at least two options.`);
+    if (q.type === 'score' && (!Array.isArray(q.criteria) || q.criteria.length < 2 || q.criteria.length > 10 || new Set(q.criteria.map(textOf)).size !== q.criteria.length)) throw new Error(`${id}: score needs 2 to 10 distinct levels.`);
+    if (!validThreshold(gateFor(id, q.type).threshold)) throw new Error(`${id}: enter a gate threshold between 0 and 1.`);
+  }
+  delete r.model; return r;
+}
+$('#mode').onclick = e => {
+  const b = e.target.closest('button'); if (!b || b.dataset.m === mode) return;
+  if (b.dataset.m === 'json') { $('#json').value = JSON.stringify(doc, null, 2); }
+  else {
+    try { doc = currentRequest(); } catch (err) { $('#inErr2').textContent = err.message; return; }
+    for (const [id, q] of Object.entries(doc.questions)) gates[id] = gateFor(id, q.type);
+    if (!Object.hasOwn(doc.questions, sel)) sel = Object.keys(doc.questions)[0];
+    $('#state').value = textOf(doc.state); renderTabs(); renderEditor();
+  }
+  $('#inErr').textContent = $('#inErr2').textContent = ''; mode = b.dataset.m;
+  placeCriteriaControl();
+  document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
+  $('#formView').hidden = mode !== 'form'; $('#jsonView').hidden = mode !== 'json';
+};
+function setTarget(t) {
+  if (target !== t) invalidateResults();
+  target = t; document.querySelectorAll('#target button').forEach(x => x.classList.toggle('on', x.dataset.t === t));
+  $('#inTitle').textContent = `Input -> ${TARGETS[t]}`;
+}
+$('#target').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return; setTarget(b.dataset.t);
+  if (target !== 'local' && health && !health.key.set) openKey('Add your API key to use the configured remote model.');
+};
+$('#outMode').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return; outMode = b.dataset.o;
+  document.querySelectorAll('#outMode button').forEach(x => x.classList.toggle('on', x === b)); renderOut();
+};
+
+// ---------------- API ----------------
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j;
+}
+async function refreshHealth() {
+  try {
+    health = await api('/api/health');
+    $('#localStatus').innerHTML = `<i class="dot on"></i>local: ${esc(health.local.model)} (${esc(health.local.device)})`;
+    renderKey();
+    $('#target [data-t=local] small').textContent = `${health.local.model}, ${health.local.device}`;
+    $('#target [data-t=remote]').innerHTML = `${esc(health.remote.model)}<small>remote service, needs key</small>`;
+    TARGETS.remote = health.remote.model;
+    $('#keyHeading').textContent = `Connect ${health.remote.model}`;
+    $('#inTitle').textContent = `Input -> ${TARGETS[target]}`;
+  } catch (e) { $('#localStatus').innerHTML = '<i class="dot off"></i>server offline'; }
+}
+function renderKey() {
+  const k = health.key;
+  $('#keyText').innerHTML = k.set ? `<i class="dot on"></i> ${esc(k.masked)}<br><span style="color:var(--muted)">${esc(k.source)}</span>` : '<i class="dot warn"></i> not set';
+  $('#keyBtn').textContent = k.set ? 'Manage' : 'Add key';
+}
+async function run() {
+  if (running) return;
+  const errEl = mode === 'json' ? $('#inErr2') : $('#inErr'); errEl.textContent = '';
+  let req; try { req = currentRequest(); } catch (e) { errEl.textContent = e.message; return; }
+  if (target !== 'local' && !(health && health.key.set)) { pendingRun = true; openKey('Add your API key to run the remote decision.'); return; }
+  const runRevision = revision, runExpected = clone(expected), runGates = clone(gates);
+  const btns = [$('#run'), $('#run2')]; running = true;
+  btns.forEach(b => { b.disabled = true; b.textContent = 'Running...'; });
+  try {
+    const out = await api('/api/decide', {target, request: req, include_criteria: $('#inclCrit').checked});
+    if (revision !== runRevision) return;
+    lastOut = out; lastReq = req; lastExpected = runExpected; lastGates = runGates;
+    renderOut();
+    if (out.remote && out.remote.error === 'unauthorized') {
+      await refreshHealth();
+      if (revision === runRevision && !$('#keyDlg').open) openKey('The remote service rejected the key. Check its access and validity.');
+    }
+  } catch (e) { if (revision === runRevision) errEl.textContent = 'Request failed: ' + e.message; }
+  finally { running = false; btns.forEach(b => { b.disabled = false; b.textContent = 'Run decision'; }); }
+}
+$('#run').onclick = run; $('#run2').onclick = run;
+document.addEventListener('keydown', e => { if (!e.repeat && e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !$('#keyDlg').open) { e.preventDefault(); run(); } });
+
+// ---------------- results: one row per option, one bar per model ----------------
+function rowsFor(q, answers) {
+  // option labels and per-model probabilities, in request order
+  if (q.type === 'noul') return [['yes', answers.map(a => a && a.noul != null ? a.noul : null)], ['no', answers.map(a => a && a.noul != null ? 1 - a.noul : null)]];
+  if (q.type === 'choice') return Object.keys(q.criteria || {}).map(k => [k, answers.map(a => a && a.probabilities ? a.probabilities[k] ?? null : null)]);
+  return (q.criteria || []).map((lv, i) => [`${i}  ${textOf(lv)}`, answers.map(a => a && a.probabilities ? a.probabilities[String(i)] ?? null : null)]);
+}
+function topIdx(vals) { let b = -1, bi = -1; vals.forEach((v, i) => { if (v != null && v > b) { b = v; bi = i; } }); return bi; }
+function headline(a, type) {
+  if (!a) return null;
+  if (type === 'noul') return Number.isFinite(a.noul) ? (a.noul >= 0.5 ? 'yes' : 'no') : null;
+  if (type === 'choice') return a.choice;
+  const entries = Object.entries(a.probabilities || {}).filter(([k,v]) => /^\d+$/.test(k) && Number.isFinite(v));
+  if (!entries.length) return null;
+  return Number(entries.reduce((best, cur) => cur[1] > best[1] ? cur : best)[0]);
+}
+function gateTag(id, a, type) {
+  const g = gateFor(id, type, lastGates); const v = type === 'noul' ? a.noul : a.confidence; if (v == null) return '';
+  const ok = v >= g.threshold;
+  return `<span class="tag ${ok ? 'pass' : 'fail'}">${esc(ok ? g.pass : g.fail)}</span>`;
+}
+function verdict(id, q, a, who, kind) {
+  if (!a) return `<span class="tag who">${who}</span><span class="colerr">no answer</span>`;
+  let main = q.type === 'noul' ? `p(yes) ${pct(a.noul)}` : q.type === 'choice' ? `${esc(a.choice)}` : `pick ${headline(a, q.type) ?? '-'}; mean ${Number.isFinite(a.score) ? a.score.toFixed(2) : '-'} / ${(q.criteria || []).length - 1}`;
+  const bits = [`<span class="tag who"><i class="sw ${kind}" style="display:inline-block;width:9px;height:9px"></i>${who}</span>`, `<span class="tag">${main}</span>`];
+  if (a.confidence != null) bits.push(`<span class="tag">conf ${pct(a.confidence)}</span>`);
+  bits.push(gateTag(id, a, q.type));
+  if (a.local && a.local.should_escalate != null) bits.push(a.local.should_escalate ? `<span class="tag fail">escalate (${a.local.prediction_set.length} in set)</span>` : '<span class="tag">singleton set</span>');
+  if (Object.hasOwn(lastExpected, id)) {
+    const ok = expOk(headline(a, q.type), lastExpected[id]);
+    bits.push(`<span class="tag ${ok ? 'hit' : 'miss'}">${ok ? 'matches expected' : 'expected ' + esc(expLabel(lastExpected[id]))}</span>`);
+  }
+  return bits.join('');
+}
+function legendRow(kind, label, r) {
+  if (r.error) {
+    const msg = r.error === 'no_key' ? 'No OpenRouter key set.' : r.error === 'unauthorized' ? 'Remote key rejected: ' + (r.message || '') : r.error === 'local' ? r.message : `${r.error}${r.status ? ' (HTTP ' + r.status + ')' : ''}: ${r.message || ''}`;
+    return `<div class="lg err"><i class="sw ${kind}"></i><b>${esc(label)}</b><span class="m">${esc(msg)}</span></div>`;
+  }
+  const m = [];
+  if (Number.isFinite(r.latency_ms)) m.push(`${r.latency_ms} ms`);
+  if (r.usage && r.usage.input_tokens != null) m.push(`${esc(r.usage.input_tokens)} ${kind === 'local' ? 'state tok' : 'tok'}`);
+  if (Number.isFinite(r.cost_usd_estimate)) m.push(`$${r.cost_usd_estimate.toFixed(6)}`);
+  return `<div class="lg"><i class="sw ${kind}"></i><b>${esc(label)}</b><span style="color:var(--muted)">${esc(r.model || '')}</span><span class="m">${m.join(' | ')}</span></div>`;
+}
+function renderOut() {
+  const o = $('#out'); if (!lastOut) return;
+  if (outMode === 'json') { o.innerHTML = `<pre>${esc(JSON.stringify(lastOut, null, 2))}</pre>`; return; }
+  const sides = [['local', 'Local', lastOut.local], ['remote', health?.remote?.model || 'Remote model', lastOut.remote]].filter(s => s[2]);
+  const live = sides.filter(s => !s[2].error);
+  if (lastOut.local && lastOut.local.confidence_note) $('#statusBar').textContent = 'Local: ' + lastOut.local.confidence_note + '. Compare model probabilities; confidence measures differ.';
+  let h = `<div class="legend">${sides.map(([k, l, r]) => {
+    const ids = Object.keys(lastReq.questions).filter(id => Object.hasOwn(lastExpected, id));
+    if (r.error || !ids.length) return legendRow(k, l, r);
+    const n = ids.filter(id => expOk(headline((r.answers || {})[id], lastReq.questions[id].type), lastExpected[id])).length;
+    return legendRow(k, l, r).replace('<span class="m">', `<span class="score">${n}/${ids.length} expected</span><span class="m">`);
+  }).join('')}</div>`;
+  const warns = (lastOut.local && lastOut.local.warnings) || [];
+  if (warns.length) h += `<ul class="warns">${warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul>`;
+  const cols = `minmax(90px, 1fr) ${live.map(() => 'minmax(120px, 1.3fr)').join(' ')}`;
+  for (const [id, q] of Object.entries(lastReq.questions)) {
+    const answers = live.map(s => (s[2].answers || {})[id]);
+    const heads = answers.map(a => headline(a, q.type));
+    const flag = live.length === 2 && heads[0] != null && heads[1] != null ? (heads[0] === heads[1] ? '<span class="flag agree">agree</span>' : '<span class="flag differ">disagree</span>') : '';
+    const rows = rowsFor(q, answers); const tops = live.map((_, j) => topIdx(rows.map(r => r[1][j])));
+    const g = gateFor(id, q.type, lastGates);
+    h += `<div class="qres"><div class="qhead"><span class="inv">${esc(q.type)}</span><span class="id">${esc(id)}</span><span class="txt" title="${esc(textOf(q.instructions))}">${esc(textOf(q.instructions))}</span>${flag}</div><div class="rows">`;
+    if (live.length === 2) h += `<div class="orr" style="grid-template-columns:${cols}"><span></span>${live.map(s => `<span class="colhead">${s[1]}</span>`).join('')}</div>`;
+    const exp = Object.hasOwn(lastExpected, id) ? [].concat(lastExpected[id]) : [];   // a score may accept several levels
+    const expRows = exp.map(e => q.type === 'noul' ? (e === 'yes' ? 0 : 1) : q.type === 'choice' ? Object.keys(q.criteria || {}).indexOf(e) : e);
+    rows.forEach(([lab, vals], ri) => {
+      const isTop = tops.includes(ri);
+      h += `<div class="orr ${isTop ? 'lead' : ''}" style="grid-template-columns:${cols}"><span class="nm" title="${esc(lab)}">${esc(lab)}${expRows.includes(ri) ? '<span class="exp">expected</span>' : ''}</span>` +
+        vals.map((v, j) => `<span class="cell"><span class="track ${live[j][0]}"><i style="width:${(v || 0) * 100}%"></i>${q.type === 'noul' && ri === 0 ? `<b style="left:${g.threshold * 100}%" title="threshold"></b>` : ''}</span><span class="p ${tops[j] === ri ? 'best' : ''}">${pct(v)}</span></span>`).join('') + '</div>';
+    });
+    h += '</div>' + live.map((s, j) => `<div class="verd">${verdict(id, q, answers[j], s[1], s[0])}</div>`).join('') + '</div>';
+  }
+  o.innerHTML = h;
+}
+
+// ---------------- key dialog ----------------
+function openKey(intro) {
+  if ($('#keyDlg').open) return;
+  const k = health ? health.key : {set: false};
+  $('#keyIntro').textContent = intro || 'Your key goes to this local server, which forwards it to the configured remote provider and never sends it back to the page.';
+  $('#keyCurrent').textContent = k.set ? `Current: ${k.masked} (${k.source})` : 'API key';
+  $('#keyForget').hidden = !(k.remembered || (k.set && !k.from_env));
+  $('#keyIn').value = ''; $('#keyErr').textContent = ''; $('#keyRemember').checked = false;
+  $('#keyIn').disabled = $('#keySave').disabled = !!k.from_env;
+  if (k.from_env) $('#keyIntro').textContent = 'The key comes from OPENROUTER_API_KEY. Change that environment variable and restart the server to replace it.';
+  $('#keyDlg').showModal(); $('#keyIn').focus();
+}
+const closeKey = () => { pendingRun = false; $('#keyDlg').close(); };
+$('#keyBtn').onclick = () => openKey(); $('#keyCancel').onclick = closeKey; $('#keyX').onclick = closeKey;
+$('#keyDlg').oncancel = () => { pendingRun = false; };
+$('#keyForm').onsubmit = async e => {
+  e.preventDefault(); const key = $('#keyIn').value.trim();
+  if (!key) { $('#keyErr').textContent = 'Paste a key first.'; return; }
+  $('#keySave').disabled = true; $('#keySave').textContent = 'Checking...'; $('#keyErr').textContent = '';
+  try {
+    const r = await api('/api/key', {key, remember: $('#keyRemember').checked});
+    $('#keyIn').value = ''; health.key = r.key; renderKey(); $('#keyDlg').close();
+    if (pendingRun) { pendingRun = false; run(); }
+  } catch (err) { $('#keyErr').textContent = err.message; }
+  finally { $('#keySave').disabled = false; $('#keySave').textContent = 'Save key'; }
+};
+$('#keyForget').onclick = async () => {
+  try { const r = await api('/api/key/forget', {}); health.key = r.key; renderKey(); $('#keyDlg').close(); }
+  catch (err) { $('#keyErr').textContent = err.message; }
+};
+
+// ---------------- tutorial: a guided tour over the resume examples ----------------
+const AT_LEFT = {left: '14px', right: 'auto', bottom: '34px', top: 'auto'};
+const AT_MID = {left: '262px', right: 'auto', bottom: '34px', top: 'auto'};
+const AT_RIGHT = {left: 'auto', right: '30px', bottom: '34px', top: 'auto'};
+const presetIdx = name => PRESETS.findIndex(p => p.name === name);
+const pickTab = id => { if (Object.hasOwn(doc.questions, id)) { sel = id; renderTabs(); renderEditor(); } };
+const TOUR = [
+  {title: 'Decisions, not text', at: AT_RIGHT,
+   text: 'The local model reads a <b class="k">state</b>, answers typed questions about it, and returns a probability for every possible answer. This tour uses two fictional resumes to show how to ask good questions and assess the answers. It takes about two minutes and uses the local model shown in the picker.',
+   go: () => { setTarget('local'); loadPreset(presetIdx('Backend engineer, fintech')); }},
+  {title: '1. The state', spot: '#state', at: AT_RIGHT,
+   text: () => `The state is everything the model may look at: here a job posting followed by a resume. It can be plain text or a JSON object. The local model reads up to ${health?.local?.max_state_tokens ?? 'its configured limit of'} tokens; anything longer keeps the start and the end, and the result panel warns you.`},
+  {title: '2. Questions run together', spot: '#qtabs', at: AT_RIGHT,
+   text: 'Each tab is one question about the same state. All of them are answered in one pass over the state, so four questions cost little more than one. The id, such as <code>role_family</code>, is for your code; the model never sees it.'},
+  {title: '3. Three question types', spot: '#qtabs', at: AT_RIGHT,
+   text: '<code>choice</code> picks one option from a list (role_family). <code>noul</code> gives the probability that a statement is true (meets_must_haves, needs_sponsorship). <code>score</code> places the case on ordered levels, lowest first, and returns a weighted position between them (seniority).'},
+  {title: '4. Writing options', spot: '#editor', at: AT_RIGHT, go: () => pickTab('role_family'),
+   text: () => `Give options short, distinct names; the local model compares those names against the state. The remote model reads descriptions; the local model reads them if you tick <b class="k">criteria text to local</b>. The local model accepts 2 to ${health?.local?.max_options ?? 'its configured maximum of'} options per question.`},
+  {title: '5. Gates turn probabilities into actions', spot: '#editor .gate', at: AT_RIGHT, go: () => pickTab('meets_must_haves'),
+   text: 'A gate is your policy, not the model\'s: shortlist when p(yes) is at least 0.7, otherwise send the resume to a recruiter. Gates are never sent to the model, so you can change a threshold without changing the question.'},
+  {title: '6. Run it', spot: '#out', at: AT_LEFT, go: () => run(),
+   text: 'Run decision (or Ctrl+Enter). Every option gets a bar; the bold row is the model\'s pick and the dashed <b class="k">expected</b> tag marks the answer written for this example. The header counts how many selected levels matched. Score questions also show a weighted mean, which may differ from the selected level.'},
+  {title: '7. Two signals to read', spot: '#out', at: AT_LEFT,
+   text: 'Under each question you get the gate result. Calibrated weights also return a prediction set: <b class="k">escalate</b> means the set has zero or multiple answers; <b class="k">singleton set</b> means one answer survived. A singleton can still fail your gate or be wrong. Weights without matching calibration have no prediction sets.'},
+  {title: '8. When confidence lies', spot: '#out', at: AT_LEFT,
+   go: async () => { setTarget('local'); loadPreset(presetIdx('Registered nurse, hospital')); await run(); },
+   text: 'Now the nurse applying for an ICU job she is not qualified for. Compare the selected answers with the expected tags and check the gate and escalation signals separately. This release has made confident mistakes on this example; the displayed result depends on your weights and the criteria checkbox. Calibration on policy-rule cases does not establish reliability on resumes.'},
+  {title: '9. Measure before you trust a gate', spot: '#presets', at: AT_MID,
+   text: 'That is why every example carries expected answers, and why each use-case group pairs a positive case with a contrasting one: a model that gives the same answer to both cannot score well. When this tour was written, the local model leaned towards finance_accounting even with an empty state. Add your own cases with <code>s1ced-playground --examples my_cases.json</code> and check the header score before relying on any gate.'},
+  {title: '10. Compare with the remote model', spot: '#target', at: AT_MID,
+   text: '<b class="k">Compare both</b> sends the same request to the remote model shown in the picker. Bars sit side by side and each question is marked agree or disagree. The playground asks for your API key and forwards it to the configured provider through this local server.'},
+  {title: '11. Take it to code', spot: '#mode', at: AT_RIGHT,
+   text: 'Switch to <b class="k">JSON</b> to copy the state and questions. Send <code>Content-Type: application/json</code> and POST <code>{"target": "local", "request": ..., "include_criteria": false}</code>, matching the criteria checkbox, to <code>/api/decide</code> on this server, or send the same state and questions to OpenRouter\'s <code>/api/alpha/decisions</code>. Both return answers keyed by your question ids.'},
+];
+let tourStep = -1, examplesReady = null, tourRevision = 0;
+function clearSpot() { document.querySelectorAll('.spot').forEach(e => e.classList.remove('spot')); }
+async function showStep(i) {
+  const stepRevision = ++tourRevision;
+  tourStep = i; const s = TOUR[i]; clearSpot();
+  $('#tourBack').disabled = i === 0; $('#tourNext').textContent = i === TOUR.length - 1 ? 'Finish' : 'Next';
+  $('#tourN').textContent = `${i + 1} / ${TOUR.length}`; $('#tourProg').style.width = `${(i + 1) / TOUR.length * 100}%`;
+  $('#tourTitle').textContent = s.title; $('#tourText').innerHTML = typeof s.text === 'function' ? s.text() : s.text; Object.assign($('#tour').style, s.at);
+  $('#tourNext').disabled = true;
+  try { if (s.go) await s.go(); }
+  catch (e) { if (tourRevision === stepRevision) $('#tourText').textContent = 'This tutorial step could not run: ' + e.message; }
+  finally { if (tourRevision === stepRevision) $('#tourNext').disabled = false; }
+  if (tourRevision !== stepRevision || $('#tour').hidden) return;
+  const el = s.spot && $(s.spot); if (el) { el.classList.add('spot'); el.scrollIntoView({block: 'nearest'}); }
+  $('#tourNext').focus();
+}
+async function startTour() {
+  await examplesReady;
+  if (running) { $('#examplesErr').textContent = 'Wait for the current decision to finish before starting the tutorial.'; return; }
+  if (['Backend engineer, fintech','Registered nurse, hospital'].some(name => presetIdx(name) < 0)) {
+    $('#examplesErr').textContent = 'The tutorial needs both resume examples from the bundled examples.'; return;
+  }
+  // The walkthrough starts from a known editor state, even after invalid JSON input.
+  mode = 'form'; outMode = 'preview';
+  placeCriteriaControl();
+  $('#formView').hidden = false; $('#jsonView').hidden = true;
+  document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x.dataset.m === mode));
+  document.querySelectorAll('#outMode button').forEach(x => x.classList.toggle('on', x.dataset.o === outMode));
+  $('#examplesErr').textContent = ''; $('#tour').hidden = false; await showStep(0);
+}
+function endTour() { $('#tour').hidden = true; clearSpot(); tourStep = -1; tourRevision++; localStorage.setItem('s1ced_tour_seen', '1'); }
+$('#tourBtn').onclick = startTour; $('#tourX').onclick = endTour;
+$('#tourBack').onclick = () => !$('#tourNext').disabled && tourStep > 0 && showStep(tourStep - 1);
+$('#tourNext').onclick = () => !$('#tourNext').disabled && (tourStep < TOUR.length - 1 ? showStep(tourStep + 1) : endTour());
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#tour').hidden && !$('#keyDlg').open) endTour(); });
+
+setTarget('local'); loadPreset(0); refreshHealth(); examplesReady = loadExamples();
+examplesReady.then(() => { if (!localStorage.getItem('s1ced_tour_seen')) startTour(); });
+</script>
+</body>
+</html>

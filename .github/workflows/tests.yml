@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync
+      - run: uv run python -m unittest discover -s tests -v
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test tests/playground_ui.test.cjs
