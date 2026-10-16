@@ -121,6 +121,8 @@ uv run s1ced-playground
 
 S1-CED, Vega and Jev follow one contract: the same request, the same answers, the same errors. It is TypeSafe's System One API, so you can start free and offline on S1-CED or Vega and switch to Jev by changing one word. The full rules are in [docs/CONTRACT.md](docs/CONTRACT.md).
 
+**No Jev credits?** [docs/USE-WITHOUT-JEV.md](docs/USE-WITHOUT-JEV.md) walks through using S1-CED or Vega with TypeSafe's own SDKs, docs and cookbooks, step by step. Three environment variables switch existing TypeSafe code to the local models without changing it.
+
 **In Python**, after installing with pip:
 
 ```python

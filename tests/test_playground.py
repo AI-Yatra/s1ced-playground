@@ -19,8 +19,8 @@ class HandlerTests(unittest.TestCase):
         self.reg.models['vega-0.8b'] = ready_vega()
         self.key = 'test-key'
 
-    def handler(self, body=b'', path='/api/decide', method='POST', headers=None, vega_model='vega-0.8b'):
-        a = SimpleNamespace(port=8770, remote_model='jev-latest', vega_model=vega_model)
+    def handler(self, body=b'', path='/api/decide', method='POST', headers=None, vega_model='vega-0.8b', jev_fallback=None):
+        a = SimpleNamespace(port=8770, remote_model='jev-latest', vega_model=vega_model, jev_fallback=jev_fallback)
         keys = SimpleNamespace(key=self.key, status=lambda: {'set': bool(self.key)})
         h = object.__new__(app.make_handler(self.reg, keys, a))
         h.path, h.command = path, method
@@ -28,7 +28,7 @@ class HandlerTests(unittest.TestCase):
         h.rfile = io.BytesIO(body); h._json = lambda code, obj: setattr(h, 'response', (code, obj))
         return h
 
-    def post(self, obj, path='/v1/systemone', **kw):
+    def post(self, obj, path="/v1/systemone", **kw):
         h = self.handler(json.dumps(obj).encode(), path, **kw)
         with patch.object(models.urlreq, 'urlopen', side_effect=fake_jev_urlopen): h.do_POST()
         return h.response
@@ -67,6 +67,30 @@ class HandlerTests(unittest.TestCase):
         h = self.handler(json.dumps({**copy(REQUEST), 'model': 'jev-latest'}).encode(), '/v1/systemone', headers={'Authorization': 'Bearer local'})
         with patch.dict(os.environ, {'TYPESAFE_API_KEY': ''}): h.do_POST()
         self.assertEqual(h.response[0], 401)
+
+    def test_jev_fallback_answers_locally_and_says_so(self):
+        self.key = None
+        h = self.handler(json.dumps({**copy(REQUEST), 'model': 'jev-latest'}).encode(), '/v1/systemone',
+                         headers={'Authorization': 'Bearer local'}, jev_fallback='vega-0.8b')
+        with patch.object(models.urlreq, 'urlopen', side_effect=AssertionError('must not call TypeSafe')): h.do_POST()
+        code, out = h.response
+        self.assertEqual((code, out['model']), (200, 'vega-0.8b'))
+        self.assertIn('--jev-fallback', out['warnings'][-1])
+
+    def test_jev_fallback_is_unused_when_a_key_exists_and_aliases_get_no_warning(self):
+        code, out = self.post({**copy(REQUEST), 'model': 'jev-latest'}, jev_fallback='vega-0.8b')
+        self.assertEqual(out['model'], 'jev-1.13.0')
+        code, out = self.post({**copy(REQUEST), 'model': 'vega'}, jev_fallback='s1ced')
+        self.assertEqual((out['model'], out['warnings']), ('vega-0.8b', []))
+
+    def test_v1_accepts_zstd_bodies(self):
+        try:
+            from compression.zstd import compress
+        except ImportError:
+            import zstandard; compress = zstandard.ZstdCompressor().compress
+        body = compress(json.dumps({**copy(REQUEST), 'model': 's1ced'}).encode())
+        h = self.handler(body, '/v1/systemone', headers={'Content-Encoding': 'zstd'}); h.do_POST()
+        self.assertEqual(h.response[0], 200)
 
     def test_v1_models_lists_every_model(self):
         h = self.handler(path='/v1/models', method='GET'); h.do_GET()
