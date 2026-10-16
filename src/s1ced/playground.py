@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""S1-CED decision playground: the local release and Microsoft-Decision-1 (OpenRouter) side by side.
+"""S1-CED decision playground: the local release, Vega (a second local model) and TypeSafe's Jev side by side.
 
   s1ced-playground                          # downloads the model once, opens http://127.0.0.1:8770
   s1ced-playground --model ./release        # a local release folder instead of Hugging Face
   s1ced-playground --port 9000 --no-browser
   s1ced-playground --examples my_cases.json # your own scenarios in the sidebar
+  s1ced-playground --vega-preload           # load Vega at startup (otherwise it loads when first picked)
 
-Requests use the OpenRouter / TypeSafe decisions shape for both models:
+Requests use the TypeSafe System One shape (POST /v1/systemone) for every model:
   {"state": "..." | {...} | [...],
    "questions": {"<id>": {"type": "noul",   "instructions": "...", "criteria": {"true": "...", "false": "..."}},
                  "<id>": {"type": "choice", "instructions": "...", "criteria": {"option": "description or null", ...}},
                  "<id>": {"type": "score",  "instructions": "...", "criteria": ["level 0", "level 1", ...]}}}
-and the local model's answers are reshaped to the same response shape (answers / probabilities / confidence).
+and the local models' answers are reshaped to the same response shape (answers / probabilities / confidence).
+POST /api/decide takes target local, vega, remote, both (local + remote) or all (every model; remote only with a key).
 
-OpenRouter key: OPENROUTER_API_KEY in the environment wins. Otherwise the page asks for it the first time the
+TypeSafe key: TYPESAFE_API_KEY in the environment wins. Otherwise the page asks for it the first time the
 remote model is used. The key stays in this server process and is never sent back to the browser. If you tick
 "remember", it is stored encrypted with Windows DPAPI (readable only by your Windows user) under
 %APPDATA%\\s1ced_playground\\. On macOS and Linux it is a file readable only by your user under
@@ -27,26 +29,27 @@ from urllib import request as urlreq, error as urlerr
 from urllib.parse import urlparse
 
 from .infer import S1CED
+from .vega import VegaRunner
 
 PAGE = Path(__file__).resolve().parent / 'playground.html'
 EXAMPLES = Path(__file__).resolve().parent / 'examples.json'   # extra scenarios with expected answers
 DEFAULT_PORT = 8770
-MAX_BODY = 2_000_000                   # bytes; the remote model's 33K-token context is far below this
-REMOTE_PRICE_IN = 0.042 / 1e6          # USD per input token for microsoft/microsoft-decision-1 (output is free)
+MAX_BODY = 2_000_000                   # bytes; Jev's 64K-token request context is far below this
+REMOTE_PRICE_IN = 0.042 / 1e6          # USD per input token for Jev (output is free)
 
 
 # ---------------- key storage ----------------
 class KeyStore:
-    """Holds the OpenRouter key in memory; optionally persists it encrypted for the current OS user."""
+    """Holds the TypeSafe key in memory; optionally persists it encrypted for the current OS user."""
 
     def __init__(self):
         base = Path(os.environ.get('APPDATA') or Path.home() / '.config') / 's1ced_playground'
-        self.path = base / ('openrouter_key.dpapi' if os.name == 'nt' else 'openrouter_key')
+        self.path = base / ('typesafe_key.dpapi' if os.name == 'nt' else 'typesafe_key')
         self.key, self.source = None, None
         self.lock = threading.RLock()
-        self.env_key = os.environ.get('OPENROUTER_API_KEY', '').strip()
-        if os.environ.get('OPENROUTER_API_KEY'):
-            self.key, self.source = os.environ['OPENROUTER_API_KEY'].strip(), 'environment variable'
+        self.env_key = os.environ.get('TYPESAFE_API_KEY', '').strip()
+        if os.environ.get('TYPESAFE_API_KEY'):
+            self.key, self.source = os.environ['TYPESAFE_API_KEY'].strip(), 'environment variable'
         elif self.path.exists():
             try:
                 raw = self.path.read_bytes()
@@ -62,7 +65,7 @@ class KeyStore:
 
     def set(self, key, remember):
         with self.lock:
-            if self.env_key: raise ValueError('OPENROUTER_API_KEY is set; manage that environment variable to change the key.')
+            if self.env_key: raise ValueError('TYPESAFE_API_KEY is set; manage that environment variable to change the key.')
             if not valid_key(key): raise ValueError('API keys must contain only printable ASCII characters, without spaces.')
             source = 'this session'
             if remember:
@@ -104,7 +107,7 @@ def _dpapi(data, protect):
     kernel32.LocalFree.argtypes = [ctypes.c_void_p]; kernel32.LocalFree.restype = ctypes.c_void_p
     buf = ctypes.create_string_buffer(data, len(data))
     src, out = BLOB(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))), BLOB()
-    desc = ctypes.c_wchar_p('S1-CED playground OpenRouter key') if protect else None
+    desc = ctypes.c_wchar_p('S1-CED playground TypeSafe key') if protect else None
     if not fn(ctypes.byref(src), desc, None, None, None, 0x1, ctypes.byref(out)):   # 0x1 = CRYPTPROTECT_UI_FORBIDDEN
         raise ctypes.WinError()
     try: return ctypes.string_at(out.pbData, out.cbData)
@@ -177,11 +180,11 @@ def run_local(eng, req, include_criteria=False):
 # ---------------- remote model ----------------
 def run_remote(keys, url, model, req):
     key = keys.key
-    if not key: return {'error': 'no_key', 'message': 'No OpenRouter key set.'}
+    if not key: return {'error': 'no_key', 'message': 'No TypeSafe key set.'}
     if not valid_key(key): return {'error': 'invalid_key', 'message': 'The configured API key contains invalid characters.'}
     body = {'model': model, 'state': req.get('state'), 'questions': req.get('questions')}
     r = urlreq.Request(url, data=json.dumps(body).encode(), method='POST', headers={
-        'Authorization': f'Bearer {key}', 'Content-Type': 'application/json', 'X-Title': 'S1-CED playground'})
+        'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'})
     t0 = time.perf_counter()
     try:
         with urlreq.urlopen(r, timeout=60) as resp: out = json.loads(resp.read())
@@ -212,6 +215,10 @@ def run_remote(keys, url, model, req):
         if out.get('usage') is not None and not isinstance(out['usage'], dict): raise ValueError('remote usage must be an object')
     except urlerr.HTTPError as e:
         detail = e.read().decode(errors='replace')[:2000]
+        try:   # TypeSafe errors: {"detail": {"error_type": ..., "message": ...}}
+            d = json.loads(detail).get('detail')
+            detail = d.get('message') or detail if isinstance(d, dict) else str(d) if d else detail
+        except (ValueError, AttributeError): pass
         return {'error': 'unauthorized' if e.code == 401 else f'http_{e.code}', 'status': e.code, 'message': detail,
                 'latency_ms': round((time.perf_counter() - t0) * 1000, 1)}
     except (urlerr.URLError, TimeoutError, OSError) as e:
@@ -226,24 +233,31 @@ def run_remote(keys, url, model, req):
 
 
 def check_key(key, remote_url):
-    """OpenRouter's free key-info endpoint: confirms the key works without spending credits.
-    Other providers have no such endpoint, so their keys are accepted as given and checked on first use."""
+    """TypeSafe's model list (GET /v1/models) needs a valid key but runs no inference, so the check costs nothing.
+    Other providers' keys are accepted as given and checked on first use."""
     if not valid_key(key): return False, 'API keys must contain only printable ASCII characters, without spaces.'
-    if urlparse(remote_url).hostname != 'openrouter.ai': return True, None
-    r = urlreq.Request('https://openrouter.ai/api/v1/key', headers={'Authorization': f'Bearer {key}'})
+    u = urlparse(remote_url)
+    if u.hostname != 'api.typesafe.ai': return True, None
+    r = urlreq.Request(f'{u.scheme}://{u.netloc}/v1/models', headers={'Authorization': f'Bearer {key}'})
     try:
-        with urlreq.urlopen(r, timeout=20) as resp: d = json.loads(resp.read()).get('data', {})
-        return True, {k: d.get(k) for k in ('label', 'limit', 'limit_remaining', 'usage', 'is_free_tier')}
+        with urlreq.urlopen(r, timeout=20) as resp: d = json.loads(resp.read())
+        models = d.get('models', d) if isinstance(d, dict) else d
+        return True, {'models': [m.get('name') for m in models if isinstance(m, dict)] if isinstance(models, list) else None}
     except urlerr.HTTPError as e:
-        return False, f'OpenRouter rejected the key (HTTP {e.code}).'
+        return False, f'TypeSafe rejected the key (HTTP {e.code}).'
     except (urlerr.URLError, TimeoutError, OSError) as e:
-        return False, f'Could not reach OpenRouter to check the key: {e!r}'
+        return False, f'Could not reach TypeSafe to check the key: {e!r}'
     except Exception:
-        return False, 'OpenRouter returned an invalid or incomplete key-check response.'
+        return False, 'TypeSafe returned an invalid or incomplete key-check response.'
 
 
 # ---------------- web server ----------------
-def make_handler(eng, keys, a):
+TARGETS = {'local': ('local',), 'vega': ('vega',), 'remote': ('remote',), 'both': ('local', 'remote'),
+           'all': ('local', 'vega', 'remote')}
+
+
+def make_handler(eng, keys, a, vega=None):
+    vega = vega or VegaRunner(enabled=False)
     allowed_hosts = {f'127.0.0.1:{a.port}', f'localhost:{a.port}', f'[::1]:{a.port}'}
     pool = ThreadPoolExecutor(4)
 
@@ -281,6 +295,7 @@ def make_handler(eng, keys, a):
                                            'max_state_tokens': eng.cfg['max_state_len'] - 2, 'max_options': eng.cfg['max_options'],
                                            'threshold': eng.threshold, 'temperature': eng.T},
                                  'remote': {'url': a.remote_url, 'model': a.remote_model, 'price_in_per_m': REMOTE_PRICE_IN * 1e6},
+                                 'vega': vega.status(),
                                  'key': keys.status()})
             else:
                 self._json(404, {'error': 'not found'})
@@ -294,10 +309,12 @@ def make_handler(eng, keys, a):
                 req, target = body.get('request') or {}, body.get('target', 'local')
                 if not isinstance(req, dict) or not isinstance(req.get('questions'), dict) or not req['questions']:
                     return self._json(400, {'error': 'request must be an object with a non-empty "questions" object'})
-                jobs = {}
-                if target in ('local', 'both'): jobs['local'] = pool.submit(self._local, req, bool(body.get('include_criteria')))
-                if target in ('remote', 'both'): jobs['remote'] = pool.submit(run_remote, keys, a.remote_url, a.remote_model, req)
-                if not jobs: return self._json(400, {'error': f'unknown target {target!r}'})
+                if target not in TARGETS: return self._json(400, {'error': f'unknown target {target!r}'})
+                names = [n for n in TARGETS[target] if not (target == 'all' and n == 'remote' and not keys.key)]
+                runners = {'local': lambda: self._local(req, bool(body.get('include_criteria'))),
+                           'vega': lambda: vega.decide(req),
+                           'remote': lambda: run_remote(keys, a.remote_url, a.remote_model, req)}
+                jobs = {n: pool.submit(runners[n]) for n in names}
                 results = {}
                 for k, f in jobs.items():
                     try: results[k] = f.result()
@@ -305,13 +322,15 @@ def make_handler(eng, keys, a):
                 self._json(200, results)
             elif self.path == '/api/key':
                 key = str(body.get('key', '')).strip()
-                if keys.env_key: return self._json(400, {'error': 'OPENROUTER_API_KEY is set; manage that environment variable to change the key.'})
+                if keys.env_key: return self._json(400, {'error': 'TYPESAFE_API_KEY is set; manage that environment variable to change the key.'})
                 if not valid_key(key): return self._json(400, {'error': 'API keys must contain only printable ASCII characters, without spaces.'})
                 ok, info = check_key(key, a.remote_url)
                 if not ok: return self._json(400, {'error': info})
                 try: keys.set(key, bool(body.get('remember')))
                 except Exception as e: return self._json(500, {'error': f'Key works but could not be saved: {e!r}'})
                 self._json(200, {'key': keys.status(), 'account': info})
+            elif self.path == '/api/vega/load':
+                vega.start(); self._json(200, {'vega': vega.status()})
             elif self.path == '/api/key/forget':
                 try: keys.forget()
                 except OSError: return self._json(500, {'error': 'Could not remove the saved key; the current key is unchanged.'})
@@ -334,12 +353,12 @@ class PlaygroundServer(ThreadingHTTPServer):
         super().server_bind()
 
 
-def bind(eng, keys, a):
+def bind(eng, keys, a, vega=None):
     """Bind --port, or without one the first free port from 8770; the handler's Host check needs the real port."""
     ports = [a.port] if a.port else range(DEFAULT_PORT, DEFAULT_PORT + 20)
     for port in ports:
         a.port = port
-        try: return PlaygroundServer((a.host, port), make_handler(eng, keys, a))
+        try: return PlaygroundServer((a.host, port), make_handler(eng, keys, a, vega))
         except OSError as e:
             if e.errno not in (errno.EADDRINUSE, errno.EACCES) and getattr(e, 'winerror', None) not in (10048, 10013): raise
     sys.exit(f'error: port {ports[0]} is in use; pick another with --port' if len(ports) == 1 else
@@ -358,8 +377,12 @@ def main():
     ap.add_argument('--port', type=int, help=f'default: first free port from {DEFAULT_PORT}')
     ap.add_argument('--examples', type=Path, help='scenario file to show instead of the bundled examples')
     ap.add_argument('--no-browser', action='store_true', help='do not open the page in a browser')
-    ap.add_argument('--remote-url', default='https://openrouter.ai/api/alpha/decisions')
-    ap.add_argument('--remote-model', default='microsoft/microsoft-decision-1')
+    ap.add_argument('--remote-url', default='https://api.typesafe.ai/v1/systemone')
+    ap.add_argument('--remote-model', default='jev-latest', help='jev-latest, jev-preview, or a versioned id such as jev-1.14.0')
+    ap.add_argument('--vega-model', help='Vega checkpoint: 0.8b (default), 4b, a Hub repo id or a local folder')
+    ap.add_argument('--vega-device', help='cuda, mps or cpu (default: CUDA, then MPS, then CPU)')
+    ap.add_argument('--vega-preload', action='store_true', help='load Vega at startup instead of on first use')
+    ap.add_argument('--no-vega', action='store_true', help='hide Vega')
     a = ap.parse_args()
     if a.examples:
         if not a.examples.is_file(): ap.error(f'--examples: {a.examples} not found')
@@ -369,10 +392,12 @@ def main():
     except FileNotFoundError as e:
         sys.exit(f'error: {e}')
     keys = KeyStore()
-    srv = bind(eng, keys, a); srv.daemon_threads = True
+    vega = VegaRunner(a.vega_model, a.vega_device, enabled=not a.no_vega)
+    if a.vega_preload: vega.start()
+    srv = bind(eng, keys, a, vega); srv.daemon_threads = True
     url = f'http://{"127.0.0.1" if a.host in ("0.0.0.0", "::") else a.host}:{a.port}'
     print(f'S1-CED playground ({eng.head}, {eng.device}) ready at {url}\n'
-          f'remote: {a.remote_model}  key: {keys.status()["source"] or "not set"}\nPress Ctrl+C to stop.', file=sys.stderr, flush=True)
+          f'vega: {vega.state}  remote: {a.remote_model}  key: {keys.status()["source"] or "not set"}\nPress Ctrl+C to stop.', file=sys.stderr, flush=True)
     if not a.no_browser: threading.Timer(0.5, webbrowser.open, (url,)).start()
     try: srv.serve_forever()
     except KeyboardInterrupt: print('stopped', file=sys.stderr)

@@ -139,3 +139,23 @@ test('all 12 tutorial steps execute and closing a pending step stays closed',asy
   p.run('endTour()'); p.run('finish({local:{answers:{}}})'); await pending;
   assert.equal(p.el('#tour').hidden,true); assert.equal(p.run('tourStep'),-1);
 });
+test('compare all renders three models, flags disagreement and Vega abstain',()=>{
+  const p=page(); p.run('loadPreset(0); lastGates=clone(gates); lastReq=clone(doc); lastExpected={}; lastTarget="all"');
+  p.run(`lastOut={local:{answers:{safe_to_run:{type:'noul',noul:0.9}}},
+    vega:{answers:{safe_to_run:{type:'noul',noul:0.2,vega:{abstain:true,unbound:false,prediction_set:['no']}}}},
+    remote:{answers:{safe_to_run:{type:'noul',noul:0.95}}}}; renderOut()`);
+  const h=p.el('#out').innerHTML;
+  assert.ok(h.includes('track vega')); assert.ok(h.includes('track remote'));
+  assert.ok(h.includes('disagree')); assert.ok(h.includes('>abstain<'));
+});
+test('compare all without a key notes the skipped remote model',()=>{
+  const p=page(); p.run('loadPreset(0); lastGates=clone(gates); lastReq=clone(doc); lastExpected={}; lastTarget="all"');
+  p.run(`lastOut={local:{answers:{safe_to_run:{type:'noul',noul:0.9}}},vega:{answers:{safe_to_run:{type:'noul',noul:0.8,vega:{abstain:false,unbound:false,prediction_set:['yes']}}}}}; renderOut()`);
+  const h=p.el('#out').innerHTML;
+  assert.ok(h.includes('all agree')===false && h.includes('agree')); assert.match(h,/not run: add a TypeSafe key/);
+  assert.ok(h.includes('stands behind it'));
+});
+test('Vega target does not demand an API key',async()=>{
+  const p=page(); await p.run('examplesReady'); p.run('globalThis.calls=0; api=async(path)=>{if(path==="/api/decide") calls++; return {vega:{answers:{}}}}; setTarget("vega")');
+  await p.run('run()'); assert.equal(p.el('#keyDlg').open,undefined); assert.equal(p.run('calls'),1);
+});
