@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""S1-CED CPU inference: load a release and score typed decisions. No GPU, no conversion.
+"""S1-CED inference: the S1CED engine class and the `s1ced` command line.
 
---model takes a Hugging Face repo id (downloaded once; default syedazeez/s1ced-v3-deep) or a local release folder.
+The engine's own decide(state, [{"question", "options", "type"}]) is the low-level call. Applications should use the
+contract instead (s1ced.load / s1ced.decide, or POST /v1/systemone), which S1-CED, Vega and Jev all follow.
 
 Usage:
-  s1ced --input request.json                                          # one request, prints JSON
-  s1ced --serve --port 8000                                           # HTTP: POST /decide
-  s1ced --bench                                                       # CPU latency (add --device cuda on a GPU)
-  s1ced --model ./release --weights step_6250.pt --head deep_fusion   # other weights
+  s1ced --input request.json      # one contract request; its "model" picks s1ced (default), vega-0.8b, vega-4b or jev-latest
+  s1ced --serve --port 8000       # the local API: POST /v1/systemone, GET /v1/models
+  s1ced --bench                   # S1-CED latency (add --device cuda on a GPU)
 
-Request JSON:
-  {"state": "Policy: ... Case: ...",
-   "questions": [{"question": "What should be done?", "options": ["approve", "deny", "escalate"], "type": "choice"},
-                 {"question": "Is it inside the window?", "type": "noul"}]}
-`type` is choice | noul (options default to ["no", "yes"]) | score. The state is encoded once for all questions.
+Request JSON (the contract, as TypeSafe's System One API):
+  {"model": "s1ced", "state": "Policy: ... Case: ...",
+   "questions": {"action": {"type": "choice", "instructions": "What should be done?",
+                            "criteria": {"approve": null, "deny": null, "escalate": null}},
+                 "in_window": {"type": "noul", "instructions": "Is it inside the window?"}}}
 """
 import argparse, json, math, sys, threading, time
 from pathlib import Path
@@ -288,28 +288,6 @@ class S1CED:
         return out
 
 
-def serve(engine, host, port):
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    class H(BaseHTTPRequestHandler):
-        def _send(self, code, obj):
-            body = json.dumps(obj).encode(); self.send_response(code)
-            self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(body)))
-            self.end_headers(); self.wfile.write(body)
-        def do_GET(self):
-            self._send(200, {'ok': True, 'head': engine.head}) if self.path == '/health' else self._send(404, {'error': 'not found'})
-        def do_POST(self):
-            if self.path != '/decide': return self._send(404, {'error': 'not found'})
-            try:
-                req = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
-                t = time.perf_counter(); res = engine.decide(req['state'], req['questions'])
-                self._send(200, {'results': res, 'latency_ms': round((time.perf_counter() - t) * 1000, 2)})
-            except Exception as e:
-                self._send(400, {'error': repr(e)})
-        def log_message(self, *a): pass
-    print(f'serving S1-CED ({engine.head}) on http://{host}:{port}  POST /decide  GET /health', file=sys.stderr)
-    ThreadingHTTPServer((host, port), H).serve_forever()
-
-
 def bench(engine, reps=20):
     words = ('the policy says the customer requested a refund for the item delivered days ago and the amount was '
              'recorded in the log with several unrelated entries ').split()
@@ -324,26 +302,31 @@ def bench(engine, reps=20):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog='s1ced', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--model', '--release', dest='model',
-                    help='Hugging Face repo id or release folder (default: $S1CED_MODEL, else syedazeez/s1ced-v3-deep)')
-    ap.add_argument('--weights', help='alternative weights (.safetensors or training checkpoint .pt)')
-    ap.add_argument('--head', choices=['deep_fusion', 'late_fusion'], help='override head type (needed for v2 checkpoints)')
-    ap.add_argument('--calibration', help='calibration.json fitted for these weights')
-    ap.add_argument('--threads', type=int, help='torch CPU threads (default: torch decides)')
-    ap.add_argument('--int8', action='store_true', help='dynamic int8 quantization of linear layers (CPU only)')
-    ap.add_argument('--device', default='cpu', help='cpu or cuda')
-    ap.add_argument('--input', help='request JSON file ("-" for stdin)')
-    ap.add_argument('--serve', action='store_true'); ap.add_argument('--host', default='127.0.0.1'); ap.add_argument('--port', type=int, default=8000)
-    ap.add_argument('--bench', action='store_true')
+    """s1ced --input request.json   one contract request (its "model" picks s1ced, vega-0.8b, vega-4b or a jev- model)
+    s1ced --serve                   the local API (POST /v1/systemone, GET /v1/models) without opening a browser
+    s1ced --bench                   S1-CED speed on this machine"""
+    from .playground import add_server_args, serve
+    ap = argparse.ArgumentParser(prog='s1ced', description=main.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_server_args(ap)
+    ap.add_argument('--int8', action='store_true', help='S1-CED: dynamic int8 quantization of linear layers (CPU only)')
+    ap.add_argument('--input', help='contract request JSON file ("-" for stdin)')
+    ap.add_argument('--allow-truncation', action='store_true', help='let a model shorten input it cannot read in full, with a warning')
+    ap.add_argument('--serve', action='store_true'); ap.add_argument('--bench', action='store_true')
     a = ap.parse_args()
     if not (a.input or a.serve or a.bench): ap.error('choose --input, --serve or --bench (or run s1ced-playground for the web UI)')
-    eng = S1CED(a.model, a.weights, a.head, a.calibration, a.threads, a.int8, a.device)
-    if a.bench: bench(eng)
+    if a.bench: bench(S1CED(a.model, a.weights, a.head, a.calibration, a.threads, a.int8, a.device))
     if a.input:
+        from .contract import DecisionError
+        from .models import Registry
         req = json.load(sys.stdin if a.input == '-' else open(a.input, encoding='utf-8-sig'))
-        print(json.dumps(eng.decide(req['state'], req['questions']), indent=2))
-    if a.serve: serve(eng, a.host, a.port)
+        if isinstance(req, dict): req.setdefault('model', 's1ced')
+        s1 = {'release': a.model, 'weights': a.weights, 'head': a.head, 'calibration': a.calibration, 'threads': a.threads,
+              'int8': a.int8, 'device': a.device}
+        try:
+            print(json.dumps(Registry(s1ced=s1, vega_device=a.vega_device, jev_url=a.remote_url).run(req, a.allow_truncation), indent=2))
+        except DecisionError as e:
+            print(json.dumps({'status': e.status, **e.body()}, indent=2)); sys.exit(1)
+    if a.serve: serve(a, open_browser=False)
 
 
 if __name__ == '__main__':

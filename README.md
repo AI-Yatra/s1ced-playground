@@ -52,7 +52,7 @@ Your browser opens the playground and a short tutorial starts. If the browser do
 
 1. Click a scenario in the left sidebar, for example **Agent guardrail**.
 2. Click **Run decision** (or press Ctrl+Enter).
-3. Read the result on the right: each answer has a probability bar. **escalate** means the model is unsure and a human should decide. **singleton set** means it is confident.
+3. Read the result on the right: each answer has a probability bar. **needs review** means the model is unsure and a human should decide. **stands behind it** means it is confident.
 4. Change the text or the questions in the middle panel and run again.
 
 To stop the playground, press **Ctrl+C** in the terminal.
@@ -71,7 +71,7 @@ To stop the playground, press **Ctrl+C** in the terminal.
 
 ## Know its limits
 
-On cases like its training data the model picks the right answer 83% of the time, and when it says it is confident it is right 96% of the time. On text that looks different from its training data it is much weaker, sometimes close to guessing. On the realistic examples in this playground it gets 15 of 38 answers right.
+On cases like its training data the model picks the right answer 83% of the time, and when it says it is confident it is right 96% of the time. On text that looks different from its training data it is much weaker, sometimes close to guessing. On the realistic examples in this playground it gets 16 of 38 answers right.
 
 So treat it as a fast first filter with a human fallback, and test it on your own cases before relying on it. The [model card](https://huggingface.co/syedazeez/s1ced-v3-deep) has the full evaluation.
 
@@ -83,7 +83,7 @@ It is bigger and slower to start than S1-CED, so it only loads when you pick **V
 
 - The first time, it downloads about 1.8 GB from Hugging Face. Loading then takes about a minute; the status at the top right shows its progress.
 - With an NVIDIA GPU it answers in about 0.2 seconds per example (laptop RTX 3050). On a CPU it takes 5 to 12 seconds per example, which works but is slow. To use the GPU, start with `--torch-backend auto` instead of `--torch-backend cpu`, or install the CUDA version of PyTorch (see [Other ways to install](#other-ways-to-install)).
-- On the playground's 38 example answers it got 20 to 21 right (GPU and CPU differ by one), against 15 for S1-CED and 35 for Jev. In one run it answered 9 without abstaining and got 7 of those right.
+- On the playground's 38 example answers it got 20 to 21 right (GPU and CPU differ by one), against 16 for S1-CED and 35 for Jev. In one run it answered 9 without abstaining and got 7 of those right.
 
 Options: `--vega-model 4b` for the larger version, `--vega-device cpu` to keep it off the GPU, `--vega-preload` to load it at startup, and `--no-vega` to hide it.
 
@@ -117,50 +117,58 @@ cd s1ced-playground
 uv run s1ced-playground
 ```
 
-## Use the model in your own code
+## Use the models in your own code
 
-After installing with pip:
+S1-CED, Vega and Jev follow one contract: the same request, the same answers, the same errors. It is TypeSafe's System One API, so you can start free and offline on S1-CED or Vega and switch to Jev by changing one word. The full rules are in [docs/CONTRACT.md](docs/CONTRACT.md).
+
+**In Python**, after installing with pip:
 
 ```python
-from s1ced import S1CED
+import s1ced
 
-model = S1CED.from_pretrained()
-
-results = model.decide(
+model = s1ced.load("s1ced")          # or "vega-0.8b", "vega-4b", "jev-latest"
+out = model.decide(
     "Task: clean up inactive accounts. Proposed tool call: delete_rows(table='customers'). No backup was taken today.",
-    [
-        {"question": "Is this action safe to run without a human approving it first?", "type": "noul"},
-        {"question": "What should happen next?", "options": ["run it", "take a backup first", "ask the owner"]},
-    ],
+    {"safe": {"type": "noul", "instructions": "Is this action safe to run without a human approving it first?"},
+     "next": {"type": "choice", "instructions": "What should happen next?",
+              "criteria": {"run it": None, "take a backup first": None, "ask the owner": None}}},
 )
-for r in results:
-    print(r["selected"], r["probabilities"], "escalate" if r["should_escalate"] else "confident")
+print(out["answers"]["safe"]["noul"], out["answers"]["next"]["choice"], out["answers"]["next"]["uncertainty"]["needs_review"])
 ```
 
-Each result contains:
-
-| field | meaning |
-|---|---|
-| `selected` | the most likely answer |
-| `probabilities` | probability of every option |
-| `confidence` | probability of the selected answer |
-| `prediction_set` | every option the model cannot rule out |
-| `should_escalate` | `true` when more than one option is in the set, so a human should check |
-
-There is also a command-line tool:
+**Over HTTP, from any language**: while the playground runs (or `s1ced --serve` without a browser), it serves the same API as TypeSafe on your computer:
 
 ```bash
-s1ced --input request.json      # answer one request from a file
-s1ced --serve --port 8000       # HTTP API: POST /decide
-s1ced --bench                   # measure speed on your machine
+curl http://127.0.0.1:8770/v1/systemone -H "Content-Type: application/json" -d '{
+  "model": "vega-0.8b",
+  "state": "Customer: I was charged twice for my March invoice.",
+  "questions": {"team": {"type": "choice", "instructions": "Which team should handle this?",
+                         "criteria": {"billing": null, "technical": null}}}}'
 ```
 
-A request file looks like this:
+**With TypeSafe's own SDKs** ([Python](https://docs.typesafe.ai/sdk/python), [JavaScript](https://docs.typesafe.ai/sdk/javascript)), point `base_url` at the local server. Local models ignore the key, so any placeholder works:
+
+```python
+from typesafe_sdk import TypeSafeClient, Noul
+
+with TypeSafeClient(base_url="http://127.0.0.1:8770", api_key="local", model="s1ced") as client:
+    r = client.system_one(state="Our whole team is locked out.", questions={"urgent": Noul(instructions="Is this urgent?")})
+print(r.nouls["urgent"].noul)
+```
+
+Remove `base_url` and use your TypeSafe key to run the same code on Jev.
+
+Every answer carries the same `uncertainty` block, whichever model answered: `prediction_set`, `abstain`, `out_of_scope`, and `needs_review`, which is true when the model abstains, calls the question out of scope, or cannot narrow its answer to one option. A signal a model does not produce is `null`.
+
+**On the command line**, `s1ced --input request.json` answers one request. The request's `model` field picks the model, and `s1ced` is the default:
 
 ```json
-{"state": "Policy: refunds within 30 days. Case: bought 12 days ago, unopened.",
- "questions": [{"question": "Is the refund allowed?", "type": "noul"}]}
+{"model": "s1ced",
+ "state": "Policy: refunds within 30 days. Case: bought 12 days ago, unopened.",
+ "questions": {"allowed": {"type": "noul", "instructions": "Is the refund allowed?"}}}
 ```
+
+`s1ced --bench` measures S1-CED's speed on your machine. The low-level `S1CED` class is still available for S1-CED alone.
 
 ## Troubleshooting
 

@@ -1,171 +1,121 @@
+import gzip
 import io
 import json
 import os
 from pathlib import Path
-import tempfile
 import shutil
 import uuid
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from s1ced import playground as app
-from s1ced import vega
-
-
-class RemoteTests(unittest.TestCase):
-    def invoke(self, payload):
-        with patch.object(app.urlreq, 'urlopen', return_value=io.BytesIO(payload)):
-            return app.run_remote(SimpleNamespace(key='fake-test-key'), 'https://example.test/decide', 'test', {})
-
-    def test_malformed_success_is_a_remote_error(self):
-        for body in (b'<html>proxy error</html>', b'[]', b'null', b'{"usage":[1]}'):
-            with self.subTest(body=body):
-                self.assertIn('error', self.invoke(body))
-
-    def test_provider_error_envelope_has_readable_message(self):
-        out = self.invoke(b'{"error":{"code":502,"message":"upstream timeout"}}')
-        self.assertIsInstance(out['error'], str)
-        self.assertEqual(out['message'], 'upstream timeout')
-
-    def test_403_does_not_claim_key_is_invalid(self):
-        err = app.urlerr.HTTPError('https://example.test', 403, 'Forbidden', {}, io.BytesIO(b'policy blocked'))
-        with patch.object(app.urlreq, 'urlopen', side_effect=err):
-            out = app.run_remote(SimpleNamespace(key='test'), 'https://example.test', 'test', {})
-        self.assertNotEqual(out['error'], 'unauthorized')
-        self.assertIn('policy blocked', out['message'])
-
-    def test_typesafe_error_detail_is_unwrapped(self):
-        body = b'{"detail":{"error_type":"authentication_error","message":"Cannot authenticate with the server."}}'
-        err = app.urlerr.HTTPError('https://api.typesafe.ai/v1/systemone', 401, 'Unauthorized', {}, io.BytesIO(body))
-        with patch.object(app.urlreq, 'urlopen', side_effect=err):
-            out = app.run_remote(SimpleNamespace(key='test'), 'https://api.typesafe.ai/v1/systemone', 'jev-latest', {})
-        self.assertEqual(out['error'], 'unauthorized')
-        self.assertEqual(out['message'], 'Cannot authenticate with the server.')
-
-    def test_typesafe_key_check_uses_model_list(self):
-        seen = []
-        def fake(req, timeout):
-            seen.append(req.full_url); return io.BytesIO(b'{"models":[{"name":"jev-latest"}]}')
-        with patch.object(app.urlreq, 'urlopen', side_effect=fake):
-            ok, info = app.check_key('test', 'https://api.typesafe.ai/v1/systemone')
-        self.assertTrue(ok)
-        self.assertEqual(seen, ['https://api.typesafe.ai/v1/models'])
-        self.assertEqual(info['models'], ['jev-latest'])
-
-    def test_invalid_unicode_key_is_rejected_before_network(self):
-        with patch.object(app.urlreq, 'urlopen', side_effect=AssertionError('must not contact provider')):
-            out = app.run_remote(SimpleNamespace(key='test\u200bkey'), 'https://example.test', 'test', {})
-        self.assertEqual(out['error'], 'invalid_key')
-
-    def test_malformed_answer_values_are_errors(self):
-        for answer in ({'noul':{}}, {'confidence':'high'}, {'probabilities':{'yes':'0.8'}}, 'not an answer'):
-            with self.subTest(answer=answer):
-                out = self.invoke(json.dumps({'answers':{'q':answer}}).encode())
-                self.assertIn('error',out)
-
-    def test_remote_cannot_supply_local_calibration_metadata(self):
-        out = self.invoke(b'{"answers":{"q":{"noul":0.8,"local":{"should_escalate":true}}}}')
-        self.assertNotIn('local',out['answers']['q'])
+from s1ced import models, playground as app
+from test_contract import REQUEST, FakeS1CED, copy, fake_jev_urlopen, ready_vega
 
 
 class HandlerTests(unittest.TestCase):
-    def handler(self, body=b'', path='/api/decide', key='test', vega=None):
-        a = SimpleNamespace(port=8770, remote_url='https://example.test', remote_model='test')
-        h = object.__new__(app.make_handler(SimpleNamespace(), SimpleNamespace(key=key), a, vega))
-        h.path = path; h.command = 'POST'; h.headers = {'Host':'127.0.0.1:8770','Content-Type':'application/json','Content-Length':str(len(body))}
-        h.rfile = io.BytesIO(body); h._json = lambda code, obj: setattr(h, 'response', (code,obj))
+    def setUp(self):
+        self.reg = models.Registry(s1ced={'engine': FakeS1CED()}, jev_key=lambda: self.key)
+        self.reg.models['vega-0.8b'] = ready_vega()
+        self.key = 'test-key'
+
+    def handler(self, body=b'', path='/api/decide', method='POST', headers=None, vega_model='vega-0.8b'):
+        a = SimpleNamespace(port=8770, remote_model='jev-latest', vega_model=vega_model)
+        keys = SimpleNamespace(key=self.key, status=lambda: {'set': bool(self.key)})
+        h = object.__new__(app.make_handler(self.reg, keys, a))
+        h.path, h.command = path, method
+        h.headers = {'Host': '127.0.0.1:8770', 'Content-Type': 'application/json', 'Content-Length': str(len(body)), **(headers or {})}
+        h.rfile = io.BytesIO(body); h._json = lambda code, obj: setattr(h, 'response', (code, obj))
         return h
 
-    def test_compare_preserves_local_answer_when_remote_throws(self):
-        h = self.handler(json.dumps({'target':'both','request':{'questions':{'q':{'type':'noul'}}}}).encode())
-        h._local = lambda *args: {'answers':{'q':{'noul':0.75}}}
-        with patch.object(app, 'run_remote', side_effect=RuntimeError('upstream failed')): h.do_POST()
-        self.assertEqual(h.response[0],200)
-        self.assertEqual(h.response[1]['local']['answers']['q']['noul'],0.75)
-        self.assertIn('error',h.response[1]['remote'])
+    def post(self, obj, path='/v1/systemone', **kw):
+        h = self.handler(json.dumps(obj).encode(), path, **kw)
+        with patch.object(models.urlreq, 'urlopen', side_effect=fake_jev_urlopen): h.do_POST()
+        return h.response
 
-    def test_compare_all_runs_every_model_and_skips_remote_without_key(self):
-        vega = SimpleNamespace(decide=lambda req: {'answers': {'q': {'noul': 0.6}}})
-        h = self.handler(json.dumps({'target':'all','request':{'questions':{'q':{'type':'noul'}}}}).encode(), key=None, vega=vega)
-        h._local = lambda *args: {'answers':{'q':{'noul':0.75}}}
-        with patch.object(app, 'run_remote', side_effect=AssertionError('must not call remote without a key')): h.do_POST()
+    def test_v1_systemone_answers_every_model_in_one_shape(self):
+        shapes = set()
+        for name in ('s1ced', 'vega-0.8b', 'jev-latest'):
+            code, out = self.post({**copy(REQUEST), 'model': name})
+            self.assertEqual(code, 200, out)
+            shapes.add(tuple(sorted(out['answers']['team'])))
+        self.assertEqual(len(shapes), 1)
+
+    def test_v1_errors_use_the_typesafe_error_body(self):
+        req = {**copy(REQUEST), 'model': 's1ced'}; req['questions']['team']['type'] = 'box'
+        code, out = self.post(req)
+        self.assertEqual(code, 422)
+        self.assertEqual(set(out['detail']), {'error_type', 'message', 'loc'})
+        self.assertEqual(self.post({**copy(REQUEST), 'model': 'gpt-5'})[0], 404)
+
+    def test_v1_accepts_gzip_bodies(self):
+        body = gzip.compress(json.dumps({**copy(REQUEST), 'model': 's1ced'}).encode())
+        h = self.handler(body, '/v1/systemone', headers={'Content-Encoding': 'gzip'}); h.do_POST()
         self.assertEqual(h.response[0], 200)
-        self.assertEqual(set(h.response[1]), {'local', 'vega'})
 
-    def test_vega_target_without_vega_reports_it_is_off(self):
-        h = self.handler(json.dumps({'target':'vega','request':{'questions':{'q':{'type':'noul'}}}}).encode()); h.do_POST()
-        self.assertEqual(h.response[1]['vega']['error'], 'vega_off')
+    def test_unknown_encoding_is_415(self):
+        h = self.handler(b'xx', '/v1/systemone', headers={'Content-Encoding': 'br'}); h.do_POST()
+        self.assertEqual(h.response[0], 415)
+
+    def test_jev_without_server_key_uses_the_callers_bearer_token(self):
+        self.key = None; seen = []
+        def capture(req, timeout=None):
+            seen.append(req.get_header('Authorization')); return fake_jev_urlopen(req)
+        h = self.handler(json.dumps({**copy(REQUEST), 'model': 'jev-latest'}).encode(), '/v1/systemone', headers={'Authorization': 'Bearer team-key'})
+        with patch.object(models.urlreq, 'urlopen', side_effect=capture): h.do_POST()
+        self.assertEqual((h.response[0], seen), (200, ['Bearer team-key']))
+        h = self.handler(json.dumps({**copy(REQUEST), 'model': 'jev-latest'}).encode(), '/v1/systemone', headers={'Authorization': 'Bearer local'})
+        with patch.dict(os.environ, {'TYPESAFE_API_KEY': ''}): h.do_POST()
+        self.assertEqual(h.response[0], 401)
+
+    def test_v1_models_lists_every_model(self):
+        h = self.handler(path='/v1/models', method='GET'); h.do_GET()
+        self.assertEqual([m['name'] for m in h.response[1]['models']], ['s1ced', 'vega-0.8b', 'vega-4b', 'jev-latest', 'jev-preview'])
+
+    def test_compare_all_skips_jev_without_a_key_and_keeps_errors_per_model(self):
+        self.key = None
+        code, out = self.post({'target': 'all', 'request': copy(REQUEST)}, '/api/decide')
+        self.assertEqual((code, set(out)), (200, {'local', 'vega'}))
+        self.key = 'test-key'
+        err = models.urlerr.HTTPError(models.JEV_URL, 500, 'boom', {}, io.BytesIO(b'upstream failed'))
+        h = self.handler(json.dumps({'target': 'both', 'request': copy(REQUEST)}).encode())
+        with patch.object(models.urlreq, 'urlopen', side_effect=err): h.do_POST()
+        self.assertIn('answers', h.response[1]['local'])
+        self.assertEqual(h.response[1]['remote']['status'], 500)
+
+    def test_page_requests_follow_the_same_rules(self):
+        req = copy(REQUEST); req['questions']['mood']['criteria'] = ['Calm']
+        code, out = self.post({'target': 'local', 'request': req}, '/api/decide')
+        self.assertEqual(code, 422); self.assertIn('score criteria', out['error'])
+
+    def test_vega_off_is_not_offered(self):
+        code, out = self.post({'target': 'vega', 'request': copy(REQUEST)}, '/api/decide', vega_model=None)
+        self.assertEqual((code, out), (200, {}))
 
     def test_unknown_target_is_a_400_response(self):
-        h = self.handler(json.dumps({'target':'everything','request':{'questions':{'q':{'type':'noul'}}}}).encode()); h.do_POST()
-        self.assertEqual(h.response[0], 400)
+        self.assertEqual(self.post({'target': 'everything', 'request': copy(REQUEST)}, '/api/decide')[0], 400)
 
     def test_deeply_nested_json_is_a_400_response(self):
-        h = self.handler(('['*2000+'0'+']'*2000).encode()); h.do_POST()
-        self.assertEqual(h.response[0],400)
+        h = self.handler(('[' * 2000 + '0' + ']' * 2000).encode()); h.do_POST()
+        self.assertEqual(h.response[0], 400)
+
+    def test_cross_site_requests_are_forbidden(self):
+        h = self.handler(b'{}', '/v1/systemone', headers={'Origin': 'https://evil.example'}); h.do_POST()
+        self.assertEqual(h.response[0], 403)
 
     def test_bom_prefixed_examples_load(self):
-        h = self.handler(path='/api/examples'); h.command='GET'
-        testfile = Path(__file__).parent/'bom-examples.json'
+        h = self.handler(path='/api/examples', method='GET')
+        testfile = Path(__file__).parent / 'bom-examples.json'
         testfile.write_bytes(b'\xef\xbb\xbf{"groups":[]}')
         try:
             with patch.object(app, 'EXAMPLES', testfile): h.do_GET()
-            self.assertEqual(h.response,(200,{'groups':[]}))
+            self.assertEqual(h.response, (200, {'groups': []}))
         finally: testfile.unlink()
 
     def test_two_servers_cannot_bind_the_same_port(self):
-        with app.PlaygroundServer(('127.0.0.1',0),app.BaseHTTPRequestHandler) as server:
+        with app.PlaygroundServer(('127.0.0.1', 0), app.BaseHTTPRequestHandler) as server:
             with self.assertRaises(OSError):
-                app.PlaygroundServer(server.server_address,app.BaseHTTPRequestHandler)
-
-
-class VegaTests(unittest.TestCase):
-    QUESTIONS = {'ok': {'type': 'noul', 'instructions': 'Is it fine?'},
-                 'team': {'type': 'choice', 'instructions': 'Which team?', 'criteria': {'billing': 'money', 'tech': None}},
-                 'level': {'type': 'score', 'instructions': 'How bad?', 'criteria': ['Low', 'Mid', 'High']}}
-    OUT = {'answers': {
-        'ok': {'probs': {'False': 0.2, 'True': 0.8}, 'confidence': 0.8, 'prediction_set': [True], 'abstain': False, 'unbound': False, 'boolean': 0.8},
-        'team': {'probs': {'billing': 0.7, 'tech': 0.3}, 'confidence': 0.7, 'prediction_set': ['billing', 'tech'], 'abstain': True, 'unbound': False, 'choice': 'billing'},
-        'level': {'probs': {'0': 0.1, '1': 0.6, '2': 0.3}, 'confidence': 0.6, 'prediction_set': None, 'abstain': False, 'unbound': True,
-                  'score': 1, 'expected_score': 1.2}},
-        'latency_ms': 210.0, 'n_tokens': 300, 'views': 1}
-
-    def test_questions_use_vegas_boolean_type(self):
-        q = vega.to_vega(self.QUESTIONS)
-        self.assertEqual([x['type'] for x in q.values()], ['boolean', 'choice', 'score'])
-        self.assertEqual(self.QUESTIONS['ok']['type'], 'noul')
-
-    def test_answers_are_reshaped_to_the_playground_shape(self):
-        out = vega.reshape(self.QUESTIONS, self.OUT)
-        a = out['answers']
-        self.assertEqual(a['ok']['noul'], 0.8)
-        self.assertEqual(a['ok']['vega']['prediction_set'], ['yes'])
-        self.assertEqual((a['team']['choice'], a['team']['probabilities']['tech'], a['team']['vega']['abstain']), ('billing', 0.3, True))
-        self.assertEqual((a['level']['score'], a['level']['probabilities']['1'], a['level']['legend']['2']), (1.2, 0.6, 'High'))
-        self.assertTrue(a['level']['vega']['unbound'])
-        self.assertEqual(out['usage']['input_tokens'], 300)
-
-    def test_non_finite_probability_is_an_error(self):
-        bad = json.loads(json.dumps(self.OUT)); bad['answers']['team']['probs']['tech'] = float('nan')
-        with self.assertRaises(ValueError): vega.reshape(self.QUESTIONS, bad)
-
-    def test_disabled_runner_never_loads(self):
-        r = vega.VegaRunner(enabled=False); r.start()
-        self.assertEqual(r.status()['state'], 'off')
-        self.assertEqual(r.decide({'questions': self.QUESTIONS})['error'], 'vega_off')
-
-    def test_load_failure_is_reported_and_can_be_retried(self):
-        r = vega.VegaRunner()
-        with patch('vegaml.load', side_effect=OSError('no network')):
-            out = r.decide({'questions': self.QUESTIONS})
-        self.assertEqual(out['error'], 'vega_load')
-        self.assertIn('no network', out['message'])
-        fake = SimpleNamespace(engine=SimpleNamespace(device='cpu'), decide=lambda state, qs: self.OUT)
-        with patch('vegaml.load', return_value=fake):
-            out = r.decide({'state': 'x', 'questions': self.QUESTIONS})
-        self.assertEqual(out['answers']['ok']['noul'], 0.8)
-        self.assertEqual(r.status()['device'], 'cpu')
+                app.PlaygroundServer(server.server_address, app.BaseHTTPRequestHandler)
 
 
 class KeyTests(unittest.TestCase):

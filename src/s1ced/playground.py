@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""S1-CED decision playground: the local release, Vega (a second local model) and TypeSafe's Jev side by side.
+"""S1-CED decision playground and local API: S1-CED, Vega and TypeSafe's Jev under one contract (contract.py).
 
-  s1ced-playground                          # downloads the model once, opens http://127.0.0.1:8770
-  s1ced-playground --model ./release        # a local release folder instead of Hugging Face
+  s1ced-playground                          # downloads S1-CED once, opens http://127.0.0.1:8770
+  s1ced-playground --model ./release        # a local S1-CED release folder instead of Hugging Face
   s1ced-playground --port 9000 --no-browser
   s1ced-playground --examples my_cases.json # your own scenarios in the sidebar
   s1ced-playground --vega-preload           # load Vega at startup (otherwise it loads when first picked)
 
-Requests use the TypeSafe System One shape (POST /v1/systemone) for every model:
-  {"state": "..." | {...} | [...],
-   "questions": {"<id>": {"type": "noul",   "instructions": "...", "criteria": {"true": "...", "false": "..."}},
-                 "<id>": {"type": "choice", "instructions": "...", "criteria": {"option": "description or null", ...}},
-                 "<id>": {"type": "score",  "instructions": "...", "criteria": ["level 0", "level 1", ...]}}}
-and the local models' answers are reshaped to the same response shape (answers / probabilities / confidence).
-POST /api/decide takes target local, vega, remote, both (local + remote) or all (every model; remote only with a key).
+The same server is a local copy of TypeSafe's API, so any client written for Jev works against it:
+  POST /v1/systemone   {"model": "s1ced" | "vega-0.8b" | "vega-4b" | "jev-latest", "state": ..., "questions": {...}}
+  GET  /v1/models
+For example TypeSafeClient(base_url="http://127.0.0.1:8770", api_key="local", model="vega-0.8b").
 
 TypeSafe key: TYPESAFE_API_KEY in the environment wins. Otherwise the page asks for it the first time the
 remote model is used. The key stays in this server process and is never sent back to the browser. If you tick
@@ -21,21 +18,19 @@ remote model is used. The key stays in this server process and is never sent bac
 %APPDATA%\\s1ced_playground\\. On macOS and Linux it is a file readable only by your user under
 ~/.config/s1ced_playground/.
 """
-import argparse, errno, json, os, sys, time, math, socket, threading, uuid, webbrowser
+import argparse, errno, gzip, json, os, sys, socket, threading, uuid, webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib import request as urlreq, error as urlerr
-from urllib.parse import urlparse
 
-from .infer import S1CED
-from .vega import VegaRunner
+from .contract import DecisionError, check_request, loads
+from .models import JEV_PRICE_IN, JEV_URL, VEGA_SIZES, JevModel, Registry, valid_key
 
 PAGE = Path(__file__).resolve().parent / 'playground.html'
 EXAMPLES = Path(__file__).resolve().parent / 'examples.json'   # extra scenarios with expected answers
 DEFAULT_PORT = 8770
 MAX_BODY = 2_000_000                   # bytes; Jev's 64K-token request context is far below this
-REMOTE_PRICE_IN = 0.042 / 1e6          # USD per input token for Jev (output is free)
+PLACEHOLDER_KEYS = {'', 'local', 'none', 'x'}   # what clients send as api_key when they only use local models
 
 
 # ---------------- key storage ----------------
@@ -89,10 +84,6 @@ class KeyStore:
             self.source = 'environment variable' if self.env_key else None
 
 
-def valid_key(key):
-    return isinstance(key, str) and 0 < len(key) <= 400 and all(33 <= ord(c) <= 126 for c in key)
-
-
 def _dpapi(data, protect):
     """Windows CryptProtectData / CryptUnprotectData, scoped to the current user."""
     import ctypes
@@ -114,152 +105,35 @@ def _dpapi(data, protect):
     finally: kernel32.LocalFree(ctypes.cast(out.pbData, ctypes.c_void_p))
 
 
-# ---------------- local model: decisions shape <-> S1CED.decide ----------------
-def as_text(x):
-    """state / instructions / criteria may be a string, object or array; the local model only reads text."""
-    if x is None: return ''
-    return x if isinstance(x, str) else json.dumps(x, ensure_ascii=False, indent=1)
-
-
-def run_local(eng, req, include_criteria=False):
-    state = as_text(req.get('state'))
-    qs = req.get('questions') or {}
-    if not isinstance(qs, dict) or not qs: raise ValueError('questions must be a non-empty object keyed by question id')
-    max_opt = eng.cfg['max_options']; n_state = eng.cfg['max_state_len'] - 2; n_branch = eng.cfg['max_branch_len'] - 5
-    warnings, asks, meta = [], [], []
-    st_len = len(eng.tok.encode(state).ids)
-    if st_len > n_state:
-        warnings.append(f'State is {st_len} tokens; the local model keeps the first 3/4 and last 1/4 of {n_state} tokens.')
-    for qid, q in qs.items():
-        if not isinstance(q, dict): raise ValueError(f'{qid}: each question must be an object with type and instructions')
-        t = q.get('type', 'choice'); text = as_text(q.get('instructions')); crit = q.get('criteria')
-        if t == 'noul':
-            options = ['no', 'yes']
-            if include_criteria and isinstance(crit, dict):
-                text += f" (yes = {as_text(crit.get('true'))}; no = {as_text(crit.get('false'))})"
-        elif t == 'choice':
-            if not isinstance(crit, dict) or len(crit) < 2: raise ValueError(f'{qid}: choice criteria must map at least 2 options to descriptions')
-            options = list(crit)
-            if include_criteria and any(v for v in crit.values()):
-                text += ' Options: ' + '; '.join(f'{k} = {as_text(v)}' for k, v in crit.items() if v) + '.'
-        elif t == 'score':
-            if not isinstance(crit, list) or not 2 <= len(crit) <= 10: raise ValueError(f'{qid}: score criteria must be a list of 2 to 10 levels')
-            options = [as_text(c) for c in crit]
-            if len(set(options)) != len(options): raise ValueError(f'{qid}: score levels must be distinct')
-        else:
-            raise ValueError(f'{qid}: unknown type {t!r} (noul, choice or score)')
-        if len(options) > max_opt:
-            raise ValueError(f'{qid}: {len(options)} options; the local model handles at most {max_opt}')
-        q_len = len(eng.tok.encode(text).ids)
-        for o in options:
-            o_len = len(eng.tok.encode(o).ids)
-            if q_len + o_len > n_branch:          # _batch trims the question or the option whenever they do not both fit
-                warnings.append(f'{qid}: question plus option "{o[:40]}" exceeds {n_branch} tokens; the local model trims it.'); break
-        asks.append({'question': text, 'options': options, 'type': t}); meta.append((qid, t, options))
-    t0 = time.perf_counter(); res = eng.decide(state, asks); ms = (time.perf_counter() - t0) * 1000
-    answers = {}
-    for (qid, t, options), r in zip(meta, res):
-        p = r['probabilities']
-        extra = {'top_prob': r['confidence'], 'prediction_set': r.get('prediction_set'), 'should_escalate': r.get('should_escalate')}
-        if t == 'noul':
-            a = {'type': 'noul', 'noul': p['yes']}
-        elif t == 'choice':
-            a = {'type': 'choice', 'choice': r['selected'], 'probabilities': p, 'confidence': r['confidence']}
-        else:
-            probs = {str(i): p[o] for i, o in enumerate(options)}
-            a = {'type': 'score', 'score': round(sum(i * v for i, v in enumerate(probs.values())), 4),
-                 'legend': {str(i): o for i, o in enumerate(options)}, 'probabilities': probs, 'confidence': r['confidence']}
-        answers[qid] = {**a, 'local': extra}
-    note = ('confidence = top probability; no calibration for these weights, so no prediction sets' if eng.threshold is None else
-            f'confidence = top probability; escalate when the conformal set (p >= {eng.threshold:.3f}) is not a single option')
-    return {'model': f's1ced/{eng.cfg["run_name"]} ({eng.head}, {eng.device})', 'answers': answers,
-            'usage': {'input_tokens': min(st_len, n_state) + 2, 'output_tokens': 0},
-            'latency_ms': round(ms, 1), 'warnings': warnings, 'confidence_note': note}
-
-
-# ---------------- remote model ----------------
-def run_remote(keys, url, model, req):
-    key = keys.key
-    if not key: return {'error': 'no_key', 'message': 'No TypeSafe key set.'}
-    if not valid_key(key): return {'error': 'invalid_key', 'message': 'The configured API key contains invalid characters.'}
-    body = {'model': model, 'state': req.get('state'), 'questions': req.get('questions')}
-    r = urlreq.Request(url, data=json.dumps(body).encode(), method='POST', headers={
-        'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'})
-    t0 = time.perf_counter()
-    try:
-        with urlreq.urlopen(r, timeout=60) as resp: out = json.loads(resp.read())
-        if not isinstance(out, dict): raise ValueError('remote response must be a JSON object')
-        if out.get('error'):
-            err = out['error']
-            code = err.get('code') if isinstance(err, dict) else None
-            return {'error': 'unauthorized' if str(code) == '401' else 'remote', 'status': code,
-                    'message': str(err.get('message', err)) if isinstance(err, dict) else str(err),
-                    'latency_ms': round((time.perf_counter() - t0) * 1000, 1)}
-        if not isinstance(out.get('answers'), dict): raise ValueError('remote response is missing an answers object')
-        for answer in out['answers'].values():
-            if not isinstance(answer, dict): raise ValueError('each remote answer must be an object')
-            # Local conformal metadata is produced only by our local adapter.
-            answer.pop('local', None)
-            for field in ('noul', 'score', 'confidence'):
-                value = answer.get(field)
-                if value is not None and (type(value) not in (int, float) or not math.isfinite(value)):
-                    raise ValueError(f'remote {field} must be a finite number')
-                if field != 'score' and value is not None and not 0 <= value <= 1:
-                    raise ValueError(f'remote {field} must be between 0 and 1')
-            if answer.get('choice') is not None and not isinstance(answer['choice'], str):
-                raise ValueError('remote choice must be a string')
-            probs = answer.get('probabilities')
-            if probs is not None and (not isinstance(probs, dict) or any(
-                    type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in probs.values())):
-                raise ValueError('remote probabilities must be finite numbers between 0 and 1')
-        if out.get('usage') is not None and not isinstance(out['usage'], dict): raise ValueError('remote usage must be an object')
-    except urlerr.HTTPError as e:
-        detail = e.read().decode(errors='replace')[:2000]
-        try:   # TypeSafe errors: {"detail": {"error_type": ..., "message": ...}}
-            d = json.loads(detail).get('detail')
-            detail = d.get('message') or detail if isinstance(d, dict) else str(d) if d else detail
-        except (ValueError, AttributeError): pass
-        return {'error': 'unauthorized' if e.code == 401 else f'http_{e.code}', 'status': e.code, 'message': detail,
-                'latency_ms': round((time.perf_counter() - t0) * 1000, 1)}
-    except (urlerr.URLError, TimeoutError, OSError) as e:
-        return {'error': 'network', 'message': str(e.reason) if isinstance(e, urlerr.URLError) else type(e).__name__}
-    except Exception as e:
-        return {'error': 'remote_response', 'message': f'Invalid or incomplete remote response ({type(e).__name__}).'}
-    out['latency_ms'] = round((time.perf_counter() - t0) * 1000, 1)
-    u = out.get('usage') or {}
-    if isinstance(u.get('input_tokens'), (int, float)) and math.isfinite(u['input_tokens']):
-        out['cost_usd_estimate'] = round(u['input_tokens'] * REMOTE_PRICE_IN, 8)
-    return out
-
-
-def check_key(key, remote_url):
-    """TypeSafe's model list (GET /v1/models) needs a valid key but runs no inference, so the check costs nothing.
-    Other providers' keys are accepted as given and checked on first use."""
-    if not valid_key(key): return False, 'API keys must contain only printable ASCII characters, without spaces.'
-    u = urlparse(remote_url)
-    if u.hostname != 'api.typesafe.ai': return True, None
-    r = urlreq.Request(f'{u.scheme}://{u.netloc}/v1/models', headers={'Authorization': f'Bearer {key}'})
-    try:
-        with urlreq.urlopen(r, timeout=20) as resp: d = json.loads(resp.read())
-        models = d.get('models', d) if isinstance(d, dict) else d
-        return True, {'models': [m.get('name') for m in models if isinstance(m, dict)] if isinstance(models, list) else None}
-    except urlerr.HTTPError as e:
-        return False, f'TypeSafe rejected the key (HTTP {e.code}).'
-    except (urlerr.URLError, TimeoutError, OSError) as e:
-        return False, f'Could not reach TypeSafe to check the key: {e!r}'
-    except Exception:
-        return False, 'TypeSafe returned an invalid or incomplete key-check response.'
 
 
 # ---------------- web server ----------------
-TARGETS = {'local': ('local',), 'vega': ('vega',), 'remote': ('remote',), 'both': ('local', 'remote'),
-           'all': ('local', 'vega', 'remote')}
+def decode_body(raw, encoding):
+    """Request bodies may be gzip or zstd compressed, as TypeSafe's SDKs send them."""
+    encoding = (encoding or 'identity').strip().lower()
+    if encoding == 'identity': return raw
+    try:
+        if encoding in ('gzip', 'x-gzip'): return gzip.decompress(raw)
+        if encoding == 'zstd':
+            try:
+                from compression.zstd import decompress   # Python 3.14+
+            except ImportError:
+                try: from zstandard import decompress
+                except ImportError: raise DecisionError(415, 'unsupported_encoding', 'zstd needs Python 3.14 or the zstandard package; '
+                                                        'send the body uncompressed (TypeSafeClient(..., compression=False)).')
+            return decompress(raw)
+    except DecisionError: raise
+    except Exception: raise DecisionError(400, 'invalid_encoding', f'The {encoding} body could not be decompressed.')
+    raise DecisionError(415, 'unsupported_encoding', f'Content-Encoding {encoding!r} is not supported; use gzip, zstd or none.')
 
 
-def make_handler(eng, keys, a, vega=None):
-    vega = vega or VegaRunner(enabled=False)
+def make_handler(reg, keys, a):
+    """reg: models.Registry. keys: KeyStore for the Jev key. a: port, remote_model (the Jev model the page shows),
+    vega_model (the Vega size the page shows, or None when Vega is off)."""
     allowed_hosts = {f'127.0.0.1:{a.port}', f'localhost:{a.port}', f'[::1]:{a.port}'}
     pool = ThreadPoolExecutor(4)
+    sides = {'local': 's1ced', 'vega': getattr(a, 'vega_model', None), 'remote': a.remote_model}
+    targets = {'local': ('local',), 'vega': ('vega',), 'remote': ('remote',), 'both': ('local', 'remote'), 'all': ('local', 'vega', 'remote')}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *x): pass
@@ -269,8 +143,10 @@ def make_handler(eng, keys, a, vega=None):
             self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'no-store'); self.end_headers(); self.wfile.write(body)
 
+        def _error(self, e): self._json(e.status, e.body())
+
         def _trusted(self):
-            # only this page may call the API: blocks DNS rebinding (Host) and cross-site posts (Origin, JSON content type)
+            # only local clients may call: blocks DNS rebinding (Host) and cross-site posts (Origin, JSON content type)
             if self.headers.get('Host') not in allowed_hosts: return False
             origin = self.headers.get('Origin')
             if origin and origin.split('://', 1)[-1] not in allowed_hosts: return False
@@ -278,59 +154,73 @@ def make_handler(eng, keys, a, vega=None):
 
         def _body(self):
             n = int(self.headers.get('Content-Length') or 0)
-            if not 0 <= n <= MAX_BODY: raise ValueError(f'body must be at most {MAX_BODY} bytes')
-            return json.loads(self.rfile.read(n) or b'{}')
+            if not 0 <= n <= MAX_BODY: raise DecisionError(413, 'payload_too_large', f'The body must be at most {MAX_BODY} bytes.')
+            raw = decode_body(self.rfile.read(n), self.headers.get('Content-Encoding'))
+            if len(raw) > MAX_BODY: raise DecisionError(413, 'payload_too_large', f'The body must be at most {MAX_BODY} bytes.')
+            return loads(raw or b'{}')
+
+        def _model(self, name):
+            """The model for a /v1 request. A Jev request uses the server's key, or else the caller's Bearer token."""
+            m = reg.get(name)
+            if isinstance(m, JevModel) and not keys.key:
+                bearer = (self.headers.get('Authorization') or '').removeprefix('Bearer ').strip()
+                if bearer.lower() not in PLACEHOLDER_KEYS: return JevModel(m.name, bearer, m.url)
+            return m
 
         def do_GET(self):
-            if not self._trusted(): return self._json(403, {'error': 'forbidden'})
+            if not self._trusted(): return self._error(DecisionError(403, 'forbidden', 'Only local clients may call this server.'))
             if self.path in ('/', '/index.html'):
                 body = PAGE.read_bytes(); self.send_response(200)
                 self.send_header('Content-Type', 'text/html; charset=utf-8'); self.send_header('Content-Length', str(len(body)))
                 self.send_header('Cache-Control', 'no-store'); self.end_headers(); self.wfile.write(body)
+            elif self.path == '/v1/models':
+                self._json(200, reg.list())
             elif self.path == '/api/examples':
                 try: self._json(200, json.loads(EXAMPLES.read_text(encoding='utf-8-sig')) if EXAMPLES.exists() else {'groups': []})
                 except (ValueError, OSError) as e: self._json(500, {'error': f'Could not load {EXAMPLES.name}: {e}'})
             elif self.path == '/api/health':
-                self._json(200, {'local': {'model': f's1ced/{eng.cfg["run_name"]}', 'head': eng.head, 'device': str(eng.device),
-                                           'max_state_tokens': eng.cfg['max_state_len'] - 2, 'max_options': eng.cfg['max_options'],
-                                           'threshold': eng.threshold, 'temperature': eng.T},
-                                 'remote': {'url': a.remote_url, 'model': a.remote_model, 'price_in_per_m': REMOTE_PRICE_IN * 1e6},
-                                 'vega': vega.status(),
-                                 'key': keys.status()})
+                s1 = reg.get('s1ced'); eng = s1.eng
+                vega = reg.get(sides['vega']).status() if sides['vega'] else {'state': 'off'}
+                self._json(200, {'local': {'model': s1.version, 'device': str(eng.device), 'max_state_tokens': eng.cfg['max_state_len'] - 2,
+                                           'max_options': eng.cfg['max_options'], 'threshold': eng.threshold},
+                                 'remote': {'model': a.remote_model, 'price_in_per_m': JEV_PRICE_IN * 1e6},
+                                 'vega': vega, 'key': keys.status()})
             else:
                 self._json(404, {'error': 'not found'})
 
         def do_POST(self):
-            if not self._trusted(): return self._json(403, {'error': 'forbidden'})
+            if not self._trusted(): return self._error(DecisionError(403, 'forbidden', 'Only local clients may call this server.'))
             try: body = self._body()
-            except (ValueError, RecursionError) as e: return self._json(400, {'error': f'bad request body: {e}'})
-            if not isinstance(body, dict): return self._json(400, {'error': 'bad request body: expected a JSON object'})
+            except DecisionError as e: return self._error(e)
+            if self.path == '/v1/systemone':
+                try:
+                    req = check_request(body)
+                    self._json(200, self._model(req['model']).run(req))
+                except DecisionError as e: self._error(e)
+                except Exception as e: self._error(DecisionError(500, 'internal_error', f'{type(e).__name__}: {e}'))
+                return
+            if not isinstance(body, dict): return self._json(400, {'error': 'expected a JSON object'})
             if self.path == '/api/decide':
-                req, target = body.get('request') or {}, body.get('target', 'local')
-                if not isinstance(req, dict) or not isinstance(req.get('questions'), dict) or not req['questions']:
-                    return self._json(400, {'error': 'request must be an object with a non-empty "questions" object'})
-                if target not in TARGETS: return self._json(400, {'error': f'unknown target {target!r}'})
-                names = [n for n in TARGETS[target] if not (target == 'all' and n == 'remote' and not keys.key)]
-                runners = {'local': lambda: self._local(req, bool(body.get('include_criteria'))),
-                           'vega': lambda: vega.decide(req),
-                           'remote': lambda: run_remote(keys, a.remote_url, a.remote_model, req)}
-                jobs = {n: pool.submit(runners[n]) for n in names}
-                results = {}
-                for k, f in jobs.items():
-                    try: results[k] = f.result()
-                    except Exception: results[k] = {'error': k, 'message': f'{k} decision failed unexpectedly.'}
-                self._json(200, results)
+                req, target = body.get('request'), body.get('target', 'local')
+                if target not in targets: return self._json(400, {'error': f'unknown target {target!r}'})
+                try: check_request(req, model_required=False)
+                except DecisionError as e: return self._json(e.status, {'error': e.message, 'detail': e.body()['detail']})
+                req = {k: v for k, v in req.items() if k != 'model'}
+                names = [n for n in targets[target] if sides[n] and not (target == 'all' and n == 'remote' and not keys.key)]
+                jobs = {n: pool.submit(self._side, sides[n], req, bool(body.get('allow_truncation'))) for n in names}
+                self._json(200, {n: f.result() for n, f in jobs.items()})
             elif self.path == '/api/key':
                 key = str(body.get('key', '')).strip()
                 if keys.env_key: return self._json(400, {'error': 'TYPESAFE_API_KEY is set; manage that environment variable to change the key.'})
                 if not valid_key(key): return self._json(400, {'error': 'API keys must contain only printable ASCII characters, without spaces.'})
-                ok, info = check_key(key, a.remote_url)
+                ok, info = reg.get(a.remote_model).check_key(key) if reg.jev_url == JEV_URL else (True, None)
                 if not ok: return self._json(400, {'error': info})
                 try: keys.set(key, bool(body.get('remember')))
                 except Exception as e: return self._json(500, {'error': f'Key works but could not be saved: {e!r}'})
                 self._json(200, {'key': keys.status(), 'account': info})
             elif self.path == '/api/vega/load':
-                vega.start(); self._json(200, {'vega': vega.status()})
+                if not sides['vega']: return self._json(200, {'vega': {'state': 'off'}})
+                m = reg.get(sides['vega']); m.start(); self._json(200, {'vega': m.status()})
             elif self.path == '/api/key/forget':
                 try: keys.forget()
                 except OSError: return self._json(500, {'error': 'Could not remove the saved key; the current key is unchanged.'})
@@ -338,9 +228,12 @@ def make_handler(eng, keys, a, vega=None):
             else:
                 self._json(404, {'error': 'not found'})
 
-        def _local(self, req, include_criteria):
-            try: return run_local(eng, req, include_criteria)
-            except Exception as e: return {'error': 'local', 'message': str(e)}
+        @staticmethod
+        def _side(name, req, allow_truncation):
+            """One model's answer for the page, or its contract error in the same place."""
+            try: return reg.get(name).run(req, allow_truncation)
+            except DecisionError as e: return {'error': e.error_type, 'status': e.status, 'message': e.message}
+            except Exception as e: return {'error': 'internal_error', 'status': 500, 'message': f'{name} failed: {type(e).__name__}: {e}'}
     return H
 
 
@@ -353,55 +246,68 @@ class PlaygroundServer(ThreadingHTTPServer):
         super().server_bind()
 
 
-def bind(eng, keys, a, vega=None):
+def bind(reg, keys, a):
     """Bind --port, or without one the first free port from 8770; the handler's Host check needs the real port."""
     ports = [a.port] if a.port else range(DEFAULT_PORT, DEFAULT_PORT + 20)
     for port in ports:
         a.port = port
-        try: return PlaygroundServer((a.host, port), make_handler(eng, keys, a, vega))
+        try: return PlaygroundServer((a.host, port), make_handler(reg, keys, a))
         except OSError as e:
             if e.errno not in (errno.EADDRINUSE, errno.EACCES) and getattr(e, 'winerror', None) not in (10048, 10013): raise
     sys.exit(f'error: port {ports[0]} is in use; pick another with --port' if len(ports) == 1 else
              f'error: ports {ports[0]}-{ports[-1]} are all in use; pick one with --port')
 
 
-def main():
-    global EXAMPLES
-    ap = argparse.ArgumentParser(prog='s1ced-playground', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+def add_server_args(ap):
     ap.add_argument('--model', '--release', dest='model',
-                    help='Hugging Face repo id or release folder (default: $S1CED_MODEL, else syedazeez/s1ced-v3-deep)')
+                    help='S1-CED: Hugging Face repo id or release folder (default: $S1CED_MODEL, else syedazeez/s1ced-v3-deep)')
     ap.add_argument('--weights'); ap.add_argument('--calibration')
     ap.add_argument('--head', choices=['deep_fusion', 'late_fusion'], help='override head type (needed for v2 checkpoints)')
-    ap.add_argument('--threads', type=int); ap.add_argument('--device', default='cpu')
+    ap.add_argument('--threads', type=int); ap.add_argument('--device', default='cpu', help='S1-CED device (default: cpu)')
     ap.add_argument('--host', default='127.0.0.1')
     ap.add_argument('--port', type=int, help=f'default: first free port from {DEFAULT_PORT}')
-    ap.add_argument('--examples', type=Path, help='scenario file to show instead of the bundled examples')
-    ap.add_argument('--no-browser', action='store_true', help='do not open the page in a browser')
-    ap.add_argument('--remote-url', default='https://api.typesafe.ai/v1/systemone')
+    ap.add_argument('--remote-url', default=JEV_URL)
     ap.add_argument('--remote-model', default='jev-latest', help='jev-latest, jev-preview, or a versioned id such as jev-1.14.0')
-    ap.add_argument('--vega-model', help='Vega checkpoint: 0.8b (default), 4b, a Hub repo id or a local folder')
+    ap.add_argument('--vega-model', default='vega-0.8b', choices=list(VEGA_SIZES), help='the Vega size the page shows')
     ap.add_argument('--vega-device', help='cuda, mps or cpu (default: CUDA, then MPS, then CPU)')
     ap.add_argument('--vega-preload', action='store_true', help='load Vega at startup instead of on first use')
-    ap.add_argument('--no-vega', action='store_true', help='hide Vega')
-    a = ap.parse_args()
-    if a.examples:
-        if not a.examples.is_file(): ap.error(f'--examples: {a.examples} not found')
-        EXAMPLES = a.examples.resolve()
+    ap.add_argument('--no-vega', action='store_true', help='turn Vega off')
+
+
+def serve(a, open_browser=True):
+    """Start the playground and the /v1 API from parsed add_server_args arguments."""
+    from .infer import S1CED
     try:
         eng = S1CED(a.model, a.weights, a.head, a.calibration, a.threads, False, a.device)
     except FileNotFoundError as e:
         sys.exit(f'error: {e}')
     keys = KeyStore()
-    vega = VegaRunner(a.vega_model, a.vega_device, enabled=not a.no_vega)
-    if a.vega_preload: vega.start()
-    srv = bind(eng, keys, a, vega); srv.daemon_threads = True
+    reg = Registry(s1ced={'engine': eng}, vega_device=a.vega_device, vega=not a.no_vega, jev_key=lambda: keys.key, jev_url=a.remote_url)
+    if a.no_vega: a.vega_model = None
+    elif a.vega_preload: reg.get(a.vega_model).start()
+    srv = bind(reg, keys, a); srv.daemon_threads = True
     url = f'http://{"127.0.0.1" if a.host in ("0.0.0.0", "::") else a.host}:{a.port}'
+    names = ['s1ced'] + (list(VEGA_SIZES) if a.vega_model else []) + [a.remote_model]
     print(f'S1-CED playground ({eng.head}, {eng.device}) ready at {url}\n'
-          f'vega: {vega.state}  remote: {a.remote_model}  key: {keys.status()["source"] or "not set"}\nPress Ctrl+C to stop.', file=sys.stderr, flush=True)
-    if not a.no_browser: threading.Timer(0.5, webbrowser.open, (url,)).start()
+          f'API: POST {url}/v1/systemone with model {", ".join(names)}\n'
+          f'TypeSafe key: {keys.status()["source"] or "not set"}\nPress Ctrl+C to stop.', file=sys.stderr, flush=True)
+    if open_browser: threading.Timer(0.5, webbrowser.open, (url,)).start()
     try: srv.serve_forever()
     except KeyboardInterrupt: print('stopped', file=sys.stderr)
     finally: srv.server_close()
+
+
+def main():
+    global EXAMPLES
+    ap = argparse.ArgumentParser(prog='s1ced-playground', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_server_args(ap)
+    ap.add_argument('--examples', type=Path, help='scenario file to show instead of the bundled examples')
+    ap.add_argument('--no-browser', action='store_true', help='do not open the page in a browser')
+    a = ap.parse_args()
+    if a.examples:
+        if not a.examples.is_file(): ap.error(f'--examples: {a.examples} not found')
+        EXAMPLES = a.examples.resolve()
+    serve(a, not a.no_browser)
 
 
 if __name__ == '__main__':

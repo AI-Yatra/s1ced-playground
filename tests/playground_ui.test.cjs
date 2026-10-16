@@ -124,7 +124,7 @@ test('all shipped examples render real responses with consistent header scores',
     assert.ok(count,item.name); matches+=Number(count[1]); questions+=Number(count[2]);
     assert.equal(p.el('#inErr').textContent,'',item.name);
   }
-  assert.equal(matches,15); assert.equal(questions,38);
+  assert.equal(matches,16); assert.equal(questions,38);
 });
 test('all 12 tutorial steps execute and closing a pending step stays closed',async()=>{
   const fixtures=JSON.parse(fs.readFileSync(fixture('examples-results.json'),'utf8'));
@@ -139,18 +139,18 @@ test('all 12 tutorial steps execute and closing a pending step stays closed',asy
   p.run('endTour()'); p.run('finish({local:{answers:{}}})'); await pending;
   assert.equal(p.el('#tour').hidden,true); assert.equal(p.run('tourStep'),-1);
 });
-test('compare all renders three models, flags disagreement and Vega abstain',()=>{
+test('compare all renders three models, flags disagreement and the shared review signal',()=>{
   const p=page(); p.run('loadPreset(0); lastGates=clone(gates); lastReq=clone(doc); lastExpected={}; lastTarget="all"');
   p.run(`lastOut={local:{answers:{safe_to_run:{type:'noul',noul:0.9}}},
-    vega:{answers:{safe_to_run:{type:'noul',noul:0.2,vega:{abstain:true,unbound:false,prediction_set:['no']}}}},
+    vega:{answers:{safe_to_run:{type:'noul',noul:0.2,uncertainty:{abstain:true,out_of_scope:false,prediction_set:['no'],needs_review:true}}}},
     remote:{answers:{safe_to_run:{type:'noul',noul:0.95}}}}; renderOut()`);
   const h=p.el('#out').innerHTML;
   assert.ok(h.includes('track vega')); assert.ok(h.includes('track remote'));
-  assert.ok(h.includes('disagree')); assert.ok(h.includes('>abstain<'));
+  assert.ok(h.includes('disagree')); assert.ok(h.includes('needs review: abstains'));
 });
 test('compare all without a key notes the skipped remote model',()=>{
   const p=page(); p.run('loadPreset(0); lastGates=clone(gates); lastReq=clone(doc); lastExpected={}; lastTarget="all"');
-  p.run(`lastOut={local:{answers:{safe_to_run:{type:'noul',noul:0.9}}},vega:{answers:{safe_to_run:{type:'noul',noul:0.8,vega:{abstain:false,unbound:false,prediction_set:['yes']}}}}}; renderOut()`);
+  p.run(`lastOut={local:{answers:{safe_to_run:{type:'noul',noul:0.9}}},vega:{answers:{safe_to_run:{type:'noul',noul:0.8,uncertainty:{abstain:false,out_of_scope:false,prediction_set:['yes'],needs_review:false}}}}}; renderOut()`);
   const h=p.el('#out').innerHTML;
   assert.ok(h.includes('all agree')===false && h.includes('agree')); assert.match(h,/not run: add a TypeSafe key/);
   assert.ok(h.includes('stands behind it'));
