@@ -126,6 +126,25 @@ TypeSafe's examples usually write the model into the code, for example `TypeSafe
 - Change `"jev-latest"` to `"vega-0.8b"` or `"s1ced"` in the code.
 - Or start the server with `--jev-fallback vega-0.8b` and run the code unchanged. With no TypeSafe key, every `jev-` request is answered by Vega. The answer is honest about it: `response.model` is `vega-0.8b`, and `warnings` says the fallback was used.
 
+## Vega in your harness, just like Jev
+
+Anything that calls Jev can call Vega the same way: an agent loop, an eval harness, a guardrail in front of an LLM, a batch script. With the three variables from step 3 set, `TypeSafeClient()` talks to Vega. The request, the answer objects (`response.choices`, `response.nouls`, `response.scores`), the errors and the retries behave as they do with Jev. Four practical differences:
+
+1. **Load it before your harness starts.** Start the server with `--vega-preload` and wait for `vega-0.8b ready` in its terminal. A request that arrives while Vega is still loading gets `503` with a `Retry-After` header, as a busy hosted API would. The SDK retries twice and then raises an error that says Vega is loading.
+2. **Long text on a CPU needs a longer timeout.** The SDKs give up after 10 seconds. Short requests take under a second even on a CPU, but a long document with several questions can take 5 to 12 seconds without a GPU. Raise the timeout in that case: `TypeSafeClient(timeout=60)` in Python, `new TypeSafeClient({ timeout: 60000 })` in JavaScript (milliseconds).
+3. **One request at a time.** The server answers Vega requests in order. Parallel requests from your harness work, but they wait their turn, so on a CPU a batch takes the sum of its requests.
+4. **Different limits and accuracy.** Vega keeps each option with its description to 32 tokens and instructions to 256, and is less accurate than Jev (see the table below). It also returns an `uncertainty` block with `abstain` and `out_of_scope`, which Jev does not. TypeSafe's SDKs ignore it; read it from the raw response, or from `s1ced.load("vega-0.8b")` in Python, if your harness can use it.
+
+Without the server, Python code can also call Vega directly. The answers are plain dictionaries in the same shape as the HTTP API:
+
+```python
+import s1ced
+
+vega = s1ced.load("vega-0.8b")   # starts loading in the background; the first call waits for it
+out = vega.decide(state, {"urgent": {"type": "noul", "instructions": "Does this need a reply within the hour?"}})
+print(out["answers"]["urgent"]["noul"], out["answers"]["urgent"]["uncertainty"])
+```
+
 ## 6. Switch to Jev when you have credits
 
 Remove `TYPESAFE_BASE_URL`, set `TYPESAFE_API_KEY` to your real key, and set the model to `jev-latest`. Nothing else changes.

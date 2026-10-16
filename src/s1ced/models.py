@@ -27,14 +27,15 @@ class DecisionModel:
     def info(self):
         return {'name': self.name, 'description': self.description, 'release_date': self.release_date}
 
-    def run(self, req, allow_truncation=False):
+    def run(self, req, allow_truncation=False, wait=True):
         """Answer a contract request. req['model'] may be omitted; if present it must name this model.
-        allow_truncation lets a model with a shorter context shorten the input, with a warning, instead of refusing."""
+        allow_truncation lets a model with a shorter context shorten the input, with a warning, instead of refusing.
+        wait=False makes a model that is still loading answer 503 with retry_after at once, as a hosted API does."""
         check_request(req, model_required=False)
         if req.get('model') and canonical(req['model']) != self.name and not (self.name == 'jev' or self.name.startswith('jev-')):
             raise DecisionError(422, 'invalid_request', f'This is {self.name}; the request asks for {req["model"]}.', ('model',))
         t0 = time.perf_counter()
-        resp = self._run(req, allow_truncation)
+        resp = self._run(req, allow_truncation, wait)
         resp.setdefault('warnings', [])
         resp['latency_ms'] = round((time.perf_counter() - t0) * 1000, 1)
         return check_response(resp, req)
@@ -57,7 +58,7 @@ class S1CEDModel(DecisionModel):
         self.description = (f'S1-CED ({self.version}), a 38M-parameter decision encoder on {engine.device}. Reads up to '
                             f'{engine.cfg["max_state_len"] - 2} state tokens and {engine.cfg["max_options"]} options per question.')
 
-    def _run(self, req, allow_truncation):
+    def _run(self, req, allow_truncation, wait=True):
         eng = self.eng
         state = text_of(req['state'])
         max_opt, n_state, n_branch = eng.cfg['max_options'], eng.cfg['max_state_len'] - 2, eng.cfg['max_branch_len'] - 5
@@ -150,10 +151,12 @@ class VegaModel(DecisionModel):
         finally:
             self.ready.set()
 
-    def _run(self, req, allow_truncation, timeout=900):
+    def _run(self, req, allow_truncation, wait=True, timeout=900):
         if self.state == 'unavailable': raise DecisionError(503, 'model_unavailable', self.error)
         self.start()
-        if not self.ready.wait(timeout): raise DecisionError(503, 'model_loading', f'{self.name} is still loading; try again shortly.')
+        if not self.ready.wait(timeout if wait else 0):
+            raise DecisionError(503, 'model_loading', f'{self.name} is loading (about a minute, plus a 1.8 GB download the first time). '
+                                'Retry shortly, or start the server with --vega-preload.', retry_after=10)
         if self.state != 'ready': raise DecisionError(503, 'model_unavailable', self.error)
         qs = req['questions']
         vq = {qid: {**q, 'type': 'boolean' if q['type'] == 'noul' else q['type']} for qid, q in qs.items()}
@@ -223,7 +226,7 @@ class JevModel(DecisionModel):
         self._key = key if callable(key) else (lambda: key or os.environ.get('TYPESAFE_API_KEY', '').strip() or None)
         self.description = f'TypeSafe Jev ({name}), hosted. Needs a TypeSafe API key; about $0.042 per million input tokens.'
 
-    def _run(self, req, allow_truncation):
+    def _run(self, req, allow_truncation, wait=True):
         key = self._key()
         if not key: raise DecisionError(401, 'authentication_error', f'No TypeSafe key set for {self.name}. Set TYPESAFE_API_KEY or add one in the '
                                                        'playground, or use a local model: s1ced or vega-0.8b (docs/USE-WITHOUT-JEV.md).')
