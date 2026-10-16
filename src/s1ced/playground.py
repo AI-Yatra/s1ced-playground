@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .contract import DecisionError, check_request, loads
-from .models import JEV_PRICE_IN, JEV_URL, VEGA_SIZES, JevModel, Registry, valid_key
+from .models import JEV_PRICE_IN, JEV_URL, VEGA_SIZES, JevModel, Registry, canonical, valid_key
 
 PAGE = Path(__file__).resolve().parent / 'playground.html'
 EXAMPLES = Path(__file__).resolve().parent / 'examples.json'   # extra scenarios with expected answers
@@ -118,7 +118,9 @@ def decode_body(raw, encoding):
             try:
                 from compression.zstd import decompress   # Python 3.14+
             except ImportError:
-                try: from zstandard import decompress
+                try:
+                    import zstandard
+                    decompress = lambda b: zstandard.ZstdDecompressor().decompressobj().decompress(b)
                 except ImportError: raise DecisionError(415, 'unsupported_encoding', 'zstd needs Python 3.14 or the zstandard package; '
                                                         'send the body uncompressed (TypeSafeClient(..., compression=False)).')
             return decompress(raw)
@@ -160,11 +162,13 @@ def make_handler(reg, keys, a):
             return loads(raw or b'{}')
 
         def _model(self, name):
-            """The model for a /v1 request. A Jev request uses the server's key, or else the caller's Bearer token."""
+            """The model for a /v1 request. A Jev request uses the server's key, or else the caller's Bearer token,
+            or else, with --jev-fallback, the named local model (the response then says which model answered)."""
             m = reg.get(name)
             if isinstance(m, JevModel) and not keys.key:
                 bearer = (self.headers.get('Authorization') or '').removeprefix('Bearer ').strip()
                 if bearer.lower() not in PLACEHOLDER_KEYS: return JevModel(m.name, bearer, m.url)
+                if getattr(a, 'jev_fallback', None): return reg.get(a.jev_fallback)
             return m
 
         def do_GET(self):
@@ -195,7 +199,11 @@ def make_handler(reg, keys, a):
             if self.path == '/v1/systemone':
                 try:
                     req = check_request(body)
-                    self._json(200, self._model(req['model']).run(req))
+                    m = self._model(req['model'])
+                    if m.name == canonical(req['model']) or isinstance(m, JevModel): return self._json(200, m.run(req))
+                    out = m.run({**req, 'model': m.name})   # --jev-fallback: answered locally, and the response says so
+                    out['warnings'].append(f'No TypeSafe key, so this {req["model"]} request was answered by {m.name} (--jev-fallback).')
+                    self._json(200, out)
                 except DecisionError as e: self._error(e)
                 except Exception as e: self._error(DecisionError(500, 'internal_error', f'{type(e).__name__}: {e}'))
                 return
@@ -272,6 +280,8 @@ def add_server_args(ap):
     ap.add_argument('--vega-device', help='cuda, mps or cpu (default: CUDA, then MPS, then CPU)')
     ap.add_argument('--vega-preload', action='store_true', help='load Vega at startup instead of on first use')
     ap.add_argument('--no-vega', action='store_true', help='turn Vega off')
+    ap.add_argument('--jev-fallback', metavar='MODEL', help='with no TypeSafe key, answer jev-* requests with this local model '
+                    '(s1ced or a vega- model); the response names the model that answered')
 
 
 def serve(a, open_browser=True):
@@ -285,6 +295,11 @@ def serve(a, open_browser=True):
     reg = Registry(s1ced={'engine': eng}, vega_device=a.vega_device, vega=not a.no_vega, jev_key=lambda: keys.key, jev_url=a.remote_url)
     if a.no_vega: a.vega_model = None
     elif a.vega_preload: reg.get(a.vega_model).start()
+    if a.jev_fallback:
+        try: fb = reg.get(a.jev_fallback)
+        except DecisionError as e: sys.exit(f'error: --jev-fallback: {e.message}')
+        if isinstance(fb, JevModel): sys.exit('error: --jev-fallback must name a local model: s1ced or a vega- model')
+        a.jev_fallback = fb.name
     srv = bind(reg, keys, a); srv.daemon_threads = True
     url = f'http://{"127.0.0.1" if a.host in ("0.0.0.0", "::") else a.host}:{a.port}'
     names = ['s1ced'] + (list(VEGA_SIZES) if a.vega_model else []) + [a.remote_model]

@@ -157,11 +157,14 @@ class VegaModel(DecisionModel):
         if self.state != 'ready': raise DecisionError(503, 'model_unavailable', self.error)
         qs = req['questions']
         vq = {qid: {**q, 'type': 'boolean' if q['type'] == 'noul' else q['type']} for qid, q in qs.items()}
+        warnings = self._length_problems(req['state'], vq)
+        if warnings and not allow_truncation:
+            raise DecisionError(400, 'max_tokens_exceeded', ' '.join(warnings) + ' Shorten it, or allow truncation.')
         try:
             with self.run_lock:   # one decision at a time on the shared model
                 out = self.v.decide(req['state'], vq)
-        except ValueError as e:   # vegaml refuses rather than truncates, which is the contract's default anyway
-            raise DecisionError(400, 'max_tokens_exceeded' if 'token' in str(e).lower() else 'invalid_request', str(e))
+        except ValueError as e:
+            raise DecisionError(422, 'invalid_request', str(e))
         answers = {}
         for qid, q in qs.items():
             a, t, labels = out['answers'][qid], q['type'], option_labels(q)
@@ -177,7 +180,32 @@ class VegaModel(DecisionModel):
                        'probabilities': probs, 'confidence': a['confidence']}
             ans['uncertainty'] = uncertainty(pset, bool(a.get('abstain')), bool(a.get('unbound')))
             answers[qid] = ans
-        return {'model': self.name, 'answers': answers, 'usage': {'input_tokens': int(out.get('n_tokens') or 0), 'output_tokens': 0}}
+        return {'model': self.name, 'answers': answers, 'warnings': [w + ' It was shortened.' for w in warnings],
+                'usage': {'input_tokens': int(out.get('n_tokens') or 0), 'output_tokens': 0}}
+
+    def _length_problems(self, state, vq):
+        """vegaml shortens long input without saying so: the state to fit its context, instructions to 256 tokens and
+        each option ("name - description") to opt_max_tokens. Measure with its own prompt builder so the contract's
+        rule applies: refuse, or shorten with a warning only when the caller allows it."""
+        try:
+            from vegaml._common import TEMPLATES, build_prompt, option_texts, serialize_state
+            api = self.v.engine; tok, cfg = api.perc.tok, api.cfg
+        except (ImportError, AttributeError):
+            return []   # a vegaml without these internals: nothing to measure against
+        enc = lambda s: tok(s, add_special_tokens=False)['input_ids']
+        text = serialize_state(state); n_state = len(enc(text)); T = TEMPLATES[0]; opt_max = cfg['opt_max_tokens']
+        problems = []
+        for qid, qd in vq.items():
+            q = api._internal(qd)
+            _, spans = build_prompt(tok, text, q, cfg['max_len'], opt_max_tokens=opt_max,
+                                    query_first_max_state=cfg.get('query_first_max_state', 0))
+            kept = spans['state'][1] - spans['state'][0]
+            if kept < n_state: problems.append(f'{qid}: state is {n_state} tokens; {self.name} reads {kept} with this question.')
+            if len(enc(T['q'].format(t=q['t'], ins=str(q['ins'])))) > 256: problems.append(f'{qid}: instructions are over 256 tokens.')
+            long = [o for o in option_texts(q) if len(enc(T['opt'].format(o=o))) > opt_max]
+            if long: problems.append(f'{qid}: {len(long)} option(s) are over {opt_max} tokens with their description, '
+                                     f'such as "{long[0][:40]}".')
+        return problems
 
 
 # ---------------- Jev ----------------
@@ -197,7 +225,8 @@ class JevModel(DecisionModel):
 
     def _run(self, req, allow_truncation):
         key = self._key()
-        if not key: raise DecisionError(401, 'authentication_error', 'No TypeSafe key set. Set TYPESAFE_API_KEY or add one in the playground.')
+        if not key: raise DecisionError(401, 'authentication_error', f'No TypeSafe key set for {self.name}. Set TYPESAFE_API_KEY or add one in the '
+                                                       'playground, or use a local model: s1ced or vega-0.8b (docs/USE-WITHOUT-JEV.md).')
         if not valid_key(key): raise DecisionError(401, 'authentication_error', 'The TypeSafe key contains invalid characters.')
         body = {'model': self.name, 'state': req['state'], 'questions': req['questions']}
         r = urlreq.Request(self.url, data=json.dumps(body).encode(), method='POST',

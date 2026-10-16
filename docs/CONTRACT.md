@@ -50,7 +50,15 @@ Rules, the same for every model:
 6. Question ids are for your code. No model ever sees them.
 7. No model shortens your input without telling you. Input longer than a model can read is refused with `400 max_tokens_exceeded`. In Python and on the command line you can pass `allow_truncation`; the model then shortens it and says so in `warnings`.
 
-A model may support less than the contract allows. S1-CED takes at most 8 options and 510 state tokens. It then answers with a clear `400` error, never a quietly different result.
+A model may support less than the contract allows. It then answers with a clear `400` error, never a quietly different result:
+
+| model | state | instructions | options |
+|---|---|---|---|
+| `s1ced` | 510 tokens | the question with its longest option at most 91 tokens | at most 8 |
+| `vega-0.8b`, `vega-4b` | about 73,000 tokens | 256 tokens | each option with its description at most 32 tokens |
+| `jev-*` | 64k tokens per request | within the context | at most 255 |
+
+Vega's own library shortens over-long input without saying so. The adapter measures each request with Vega's own prompt builder first, so Vega follows the same rule as the others.
 
 ## The response
 

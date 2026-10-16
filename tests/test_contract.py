@@ -194,6 +194,14 @@ class VegaAdapterTests(unittest.TestCase):
             out = m.run(copy(REQUEST))
         self.assertEqual(out['model'], 'vega-0.8b'); self.assertEqual(m.status()['device'], 'cpu')
 
+    def test_vega_follows_the_same_length_rule(self):
+        m = ready_vega()
+        with patch.object(m, '_length_problems', return_value=['team: 1 option(s) are over 32 tokens.']):
+            with self.assertRaises(contract.DecisionError) as ctx: m.run(copy(REQUEST))
+            self.assertEqual((ctx.exception.status, ctx.exception.error_type), (400, 'max_tokens_exceeded'))
+            out = m.run(copy(REQUEST), allow_truncation=True)
+        self.assertEqual(out['warnings'], ['team: 1 option(s) are over 32 tokens. It was shortened.'])
+
     def test_out_of_scope_comes_from_unbound(self):
         m = ready_vega(); fake = m.v.decide
         def unbound(state, qs):
