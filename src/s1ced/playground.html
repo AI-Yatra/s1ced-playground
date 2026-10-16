@@ -104,7 +104,7 @@
   .legend { display: grid; gap: 4px; margin-bottom: 8px; }
   .lg { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); background: #fff; border: 1px solid var(--line); padding: 4px 7px; }
   .sw { width: 12px; height: 12px; border: 1px solid var(--ink); flex: none; }
-  .sw.local { background: var(--ink); } .sw.remote { background: var(--pink); }
+  .sw.local { background: var(--ink); } .sw.remote { background: var(--pink); } .sw.vega { background: var(--blue); }
   .lg .m { color: var(--muted); margin-left: auto; text-align: right; }
   .lg.err { color: var(--bad); }
   .qres { background: #fff; border: 1px solid var(--line); margin-bottom: 8px; }
@@ -123,6 +123,7 @@
   .track { height: 9px; border: 1px solid var(--ink); background: #fff radial-gradient(circle, rgba(27, 23, 24, .25) .6px, transparent .8px) 0 0 / 3px 3px; position: relative; }
   .track i { position: absolute; inset: 0 auto 0 0; background: var(--ink); }
   .track.remote i { background: var(--pink); border-right: 1px solid var(--ink); }
+  .track.vega i { background: var(--blue); border-right: 1px solid var(--ink); }
   .track b { position: absolute; top: -3px; width: 1px; height: 13px; background: var(--bad); }
   .colhead { font: 10.5px var(--mono); text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
   .verd { display: flex; gap: 6px; flex-wrap: wrap; padding: 5px 8px 7px; border-top: 1px dashed var(--soft); align-items: center; }
@@ -165,9 +166,10 @@
 <body>
 <div class="app">
   <div class="top">
-    <span class="brand">S1-CED Playground<small>v1.0</small></span>
+    <span class="brand">S1-CED Playground<small>v1.1</small></span>
     <span class="sp"></span>
     <button class="chipbtn dark" id="tourBtn" title="Step-by-step guide using the resume examples">Tutorial</button>
+    <span class="status" id="vegaStatus" hidden><i class="dot"></i>vega: not loaded</span>
     <span class="status" id="localStatus"><i class="dot"></i>local: loading</span>
   </div>
 
@@ -178,14 +180,15 @@
       <div class="body">
         <div class="pick" id="target">
           <button data-t="local" class="on">Local model<small>loading model details</small></button>
+          <button data-t="vega" hidden>Vega<small>second local model, loads on first use</small></button>
           <button data-t="remote">Remote model<small>needs key</small></button>
-          <button data-t="both">Compare both<small>same request, side by side</small></button>
+          <button data-t="all">Compare all<small>same request, every model side by side</small></button>
         </div>
         <div class="sect">Scenarios</div>
         <div class="scen" id="presets"></div>
         <div class="err" id="examplesErr" role="status"></div>
         <div class="keybox">
-          <div class="sect" style="margin:0">OpenRouter key</div>
+          <div class="sect" style="margin:0">TypeSafe key</div>
           <div class="k" id="keyText">not set</div>
           <button class="chipbtn" id="keyBtn">Add key</button>
         </div>
@@ -239,12 +242,12 @@
 </div>
 
 <dialog id="keyDlg">
-  <div class="tb"><span class="t">OpenRouter key 1.0</span><button class="x" id="keyX" style="color:#fff" title="Close">x</button></div>
+  <div class="tb"><span class="t">TypeSafe key 1.0</span><button class="x" id="keyX" style="color:#fff" title="Close">x</button></div>
   <form class="body" id="keyForm">
     <h3 id="keyHeading">Connect remote model</h3>
     <p id="keyIntro"></p>
     <div class="lab" id="keyCurrent"></div>
-    <input type="password" id="keyIn" placeholder="sk-or-v1-..." autocomplete="off" spellcheck="false">
+    <input type="password" id="keyIn" placeholder="TypeSafe API key" autocomplete="off" spellcheck="false">
     <label class="check"><input type="checkbox" id="keyRemember">Remember on this computer (encrypted for your Windows user)</label>
     <div class="err" id="keyErr"></div>
     <div class="acts">
@@ -296,12 +299,13 @@ const PRESETS = [
     gates: {is_urgent: {threshold: 0.8, pass: 'Page on-call', fail: 'Normal queue'}}},
 ];
 const DEFAULT_GATE = t => t === 'noul' ? {threshold: 0.8, pass: 'Act', fail: 'Review'} : {threshold: 0.7, pass: 'Act', fail: 'Review'};
-const TARGETS = {local: 'Local model', remote: 'Remote model', both: 'Compare both'};
+const TARGETS = {local: 'Local model', vega: 'Vega', remote: 'Remote model', all: 'Compare all'};
+const usesVega = t => t === 'vega' || t === 'all';
 
 let doc = null, gates = {}, sel = null, expected = {}, lastExpected = {}, curPreset = -1;
 const EMPTY_OUT = $('#out').innerHTML;
 let target = 'local', mode = 'form', outMode = 'preview', lastOut = null, lastReq = null, health = null, pendingRun = false;
-let running = false, revision = 0, lastGates = {};
+let running = false, revision = 0, lastGates = {}, lastTarget = 'local', vegaPoll = null;
 function invalidateResults() { revision++; pendingRun = false; lastOut = null; $('#out').innerHTML = EMPTY_OUT; }
 const gateFor = (id, type, source = gates) => Object.hasOwn(source, id) ? source[id] : DEFAULT_GATE(type);
 const validThreshold = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
@@ -492,7 +496,8 @@ function setTarget(t) {
 }
 $('#target').onclick = e => {
   const b = e.target.closest('button'); if (!b) return; setTarget(b.dataset.t);
-  if (target !== 'local' && health && !health.key.set) openKey('Add your API key to use the configured remote model.');
+  if (target === 'remote' && health && !health.key.set) openKey('Add your API key to use the configured remote model.');
+  if (usesVega(target)) loadVega();
 };
 $('#outMode').onclick = e => {
   const b = e.target.closest('button'); if (!b) return; outMode = b.dataset.o;
@@ -512,10 +517,29 @@ async function refreshHealth() {
     renderKey();
     $('#target [data-t=local] small').textContent = `${health.local.model}, ${health.local.device}`;
     $('#target [data-t=remote]').innerHTML = `${esc(health.remote.model)}<small>remote service, needs key</small>`;
+    renderVega();
     TARGETS.remote = health.remote.model;
     $('#keyHeading').textContent = `Connect ${health.remote.model}`;
     $('#inTitle').textContent = `Input -> ${TARGETS[target]}`;
   } catch (e) { $('#localStatus').innerHTML = '<i class="dot off"></i>server offline'; }
+}
+// Vega loads in the background on the server; the page starts it when Vega is picked and polls until it settles.
+function renderVega() {
+  const v = health && health.vega; const show = !!v && v.state !== 'off';
+  $('#vegaStatus').hidden = !show; $('#target [data-t=vega]').hidden = !show;
+  if (!show) { if (target === 'vega') setTarget('local'); return; }
+  const dot = {ready: 'on', loading: 'warn', idle: '', error: 'off', unavailable: 'off'}[v.state] ?? '';
+  const what = {ready: `${v.model} (${v.device})`, loading: `loading ${v.model}...`, idle: 'not loaded', error: 'failed to load', unavailable: 'not installed'}[v.state] ?? v.state;
+  $('#vegaStatus').innerHTML = `<i class="dot ${dot}"></i>vega: ${esc(what)}`;
+  $('#vegaStatus').title = v.error || (v.state === 'idle' ? 'Loads when you pick Vega or Compare all. The first load downloads about 1.8 GB.' : '');
+  $('#target [data-t=vega] small').textContent = v.state === 'ready' ? `${v.model}, ${v.device}` : v.state === 'loading' ? 'loading, first time downloads about 1.8 GB' :
+    v.state === 'idle' ? 'second local model, loads on first use' : v.error || what;
+  if (v.state !== 'loading' && vegaPoll) { clearInterval(vegaPoll); vegaPoll = null; }
+}
+async function loadVega() {
+  const v = health && health.vega; if (!v || !['idle', 'error'].includes(v.state)) return;
+  try { health.vega = (await api('/api/vega/load', {})).vega; renderVega(); } catch (_) { return; }
+  if (!vegaPoll) vegaPoll = setInterval(refreshHealth, 2000);
 }
 function renderKey() {
   const k = health.key;
@@ -526,14 +550,17 @@ async function run() {
   if (running) return;
   const errEl = mode === 'json' ? $('#inErr2') : $('#inErr'); errEl.textContent = '';
   let req; try { req = currentRequest(); } catch (e) { errEl.textContent = e.message; return; }
-  if (target !== 'local' && !(health && health.key.set)) { pendingRun = true; openKey('Add your API key to run the remote decision.'); return; }
+  if (target === 'remote' && !(health && health.key.set)) { pendingRun = true; openKey('Add your API key to run the remote decision.'); return; }
+  if (usesVega(target)) loadVega();
+  const runTarget = target;
   const runRevision = revision, runExpected = clone(expected), runGates = clone(gates);
   const btns = [$('#run'), $('#run2')]; running = true;
-  btns.forEach(b => { b.disabled = true; b.textContent = 'Running...'; });
+  btns.forEach(b => { b.disabled = true; b.textContent = usesVega(target) && health?.vega?.state === 'loading' ? 'Loading Vega...' : 'Running...'; });
   try {
     const out = await api('/api/decide', {target, request: req, include_criteria: $('#inclCrit').checked});
     if (revision !== runRevision) return;
-    lastOut = out; lastReq = req; lastExpected = runExpected; lastGates = runGates;
+    lastOut = out; lastReq = req; lastExpected = runExpected; lastGates = runGates; lastTarget = runTarget;
+    if (out.vega) refreshHealth();
     renderOut();
     if (out.remote && out.remote.error === 'unauthorized') {
       await refreshHealth();
@@ -572,6 +599,11 @@ function verdict(id, q, a, who, kind) {
   const bits = [`<span class="tag who"><i class="sw ${kind}" style="display:inline-block;width:9px;height:9px"></i>${who}</span>`, `<span class="tag">${main}</span>`];
   if (a.confidence != null) bits.push(`<span class="tag">conf ${pct(a.confidence)}</span>`);
   bits.push(gateTag(id, a, q.type));
+  if (a.vega) {
+    if (a.vega.abstain) bits.push('<span class="tag fail" title="Confidence is below the floor Vega was calibrated to stand behind">abstain</span>');
+    if (a.vega.unbound) bits.push('<span class="tag fail" title="The answer settled far from every option: likely outside what Vega was trained on">unbound</span>');
+    if (!a.vega.abstain && !a.vega.unbound) bits.push(a.vega.prediction_set && a.vega.prediction_set.length > 1 ? `<span class="tag fail">${a.vega.prediction_set.length} in set</span>` : '<span class="tag">stands behind it</span>');
+  }
   if (a.local && a.local.should_escalate != null) bits.push(a.local.should_escalate ? `<span class="tag fail">escalate (${a.local.prediction_set.length} in set)</span>` : '<span class="tag">singleton set</span>');
   if (Object.hasOwn(lastExpected, id)) {
     const ok = expOk(headline(a, q.type), lastExpected[id]);
@@ -581,7 +613,7 @@ function verdict(id, q, a, who, kind) {
 }
 function legendRow(kind, label, r) {
   if (r.error) {
-    const msg = r.error === 'no_key' ? 'No OpenRouter key set.' : r.error === 'unauthorized' ? 'Remote key rejected: ' + (r.message || '') : r.error === 'local' ? r.message : `${r.error}${r.status ? ' (HTTP ' + r.status + ')' : ''}: ${r.message || ''}`;
+    const msg = r.error === 'no_key' ? 'No TypeSafe key set.' : r.error === 'unauthorized' ? 'Remote key rejected: ' + (r.message || '') : r.error === 'local' || String(r.error).startsWith('vega') ? r.message : `${r.error}${r.status ? ' (HTTP ' + r.status + ')' : ''}: ${r.message || ''}`;
     return `<div class="lg err"><i class="sw ${kind}"></i><b>${esc(label)}</b><span class="m">${esc(msg)}</span></div>`;
   }
   const m = [];
@@ -593,7 +625,7 @@ function legendRow(kind, label, r) {
 function renderOut() {
   const o = $('#out'); if (!lastOut) return;
   if (outMode === 'json') { o.innerHTML = `<pre>${esc(JSON.stringify(lastOut, null, 2))}</pre>`; return; }
-  const sides = [['local', 'Local', lastOut.local], ['remote', health?.remote?.model || 'Remote model', lastOut.remote]].filter(s => s[2]);
+  const sides = [['local', 'Local', lastOut.local], ['vega', 'Vega', lastOut.vega], ['remote', health?.remote?.model || 'Remote model', lastOut.remote]].filter(s => s[2]);
   const live = sides.filter(s => !s[2].error);
   if (lastOut.local && lastOut.local.confidence_note) $('#statusBar').textContent = 'Local: ' + lastOut.local.confidence_note + '. Compare model probabilities; confidence measures differ.';
   let h = `<div class="legend">${sides.map(([k, l, r]) => {
@@ -601,18 +633,19 @@ function renderOut() {
     if (r.error || !ids.length) return legendRow(k, l, r);
     const n = ids.filter(id => expOk(headline((r.answers || {})[id], lastReq.questions[id].type), lastExpected[id])).length;
     return legendRow(k, l, r).replace('<span class="m">', `<span class="score">${n}/${ids.length} expected</span><span class="m">`);
-  }).join('')}</div>`;
+  }).join('')}${lastTarget === 'all' && !lastOut.remote ? `<div class="lg"><i class="sw remote"></i><b>${esc(health?.remote?.model || 'Remote model')}</b><span class="m">not run: add a TypeSafe key to include it</span></div>` : ''}</div>`;
   const warns = (lastOut.local && lastOut.local.warnings) || [];
   if (warns.length) h += `<ul class="warns">${warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul>`;
   const cols = `minmax(90px, 1fr) ${live.map(() => 'minmax(120px, 1.3fr)').join(' ')}`;
   for (const [id, q] of Object.entries(lastReq.questions)) {
     const answers = live.map(s => (s[2].answers || {})[id]);
     const heads = answers.map(a => headline(a, q.type));
-    const flag = live.length === 2 && heads[0] != null && heads[1] != null ? (heads[0] === heads[1] ? '<span class="flag agree">agree</span>' : '<span class="flag differ">disagree</span>') : '';
+    const known = heads.filter(x => x != null);
+    const flag = live.length >= 2 && known.length === live.length ? (known.every(x => x === known[0]) ? `<span class="flag agree">${live.length > 2 ? 'all agree' : 'agree'}</span>` : '<span class="flag differ">disagree</span>') : '';
     const rows = rowsFor(q, answers); const tops = live.map((_, j) => topIdx(rows.map(r => r[1][j])));
     const g = gateFor(id, q.type, lastGates);
     h += `<div class="qres"><div class="qhead"><span class="inv">${esc(q.type)}</span><span class="id">${esc(id)}</span><span class="txt" title="${esc(textOf(q.instructions))}">${esc(textOf(q.instructions))}</span>${flag}</div><div class="rows">`;
-    if (live.length === 2) h += `<div class="orr" style="grid-template-columns:${cols}"><span></span>${live.map(s => `<span class="colhead">${s[1]}</span>`).join('')}</div>`;
+    if (live.length >= 2) h += `<div class="orr" style="grid-template-columns:${cols}"><span></span>${live.map(s => `<span class="colhead">${s[1]}</span>`).join('')}</div>`;
     const exp = Object.hasOwn(lastExpected, id) ? [].concat(lastExpected[id]) : [];   // a score may accept several levels
     const expRows = exp.map(e => q.type === 'noul' ? (e === 'yes' ? 0 : 1) : q.type === 'choice' ? Object.keys(q.criteria || {}).indexOf(e) : e);
     rows.forEach(([lab, vals], ri) => {
@@ -634,7 +667,7 @@ function openKey(intro) {
   $('#keyForget').hidden = !(k.remembered || (k.set && !k.from_env));
   $('#keyIn').value = ''; $('#keyErr').textContent = ''; $('#keyRemember').checked = false;
   $('#keyIn').disabled = $('#keySave').disabled = !!k.from_env;
-  if (k.from_env) $('#keyIntro').textContent = 'The key comes from OPENROUTER_API_KEY. Change that environment variable and restart the server to replace it.';
+  if (k.from_env) $('#keyIntro').textContent = 'The key comes from TYPESAFE_API_KEY. Change that environment variable and restart the server to replace it.';
   $('#keyDlg').showModal(); $('#keyIn').focus();
 }
 const closeKey = () => { pendingRun = false; $('#keyDlg').close(); };
@@ -685,10 +718,10 @@ const TOUR = [
    text: 'Now the nurse applying for an ICU job she is not qualified for. Compare the selected answers with the expected tags and check the gate and escalation signals separately. This release has made confident mistakes on this example; the displayed result depends on your weights and the criteria checkbox. Calibration on policy-rule cases does not establish reliability on resumes.'},
   {title: '9. Measure before you trust a gate', spot: '#presets', at: AT_MID,
    text: 'That is why every example carries expected answers, and why each use-case group pairs a positive case with a contrasting one: a model that gives the same answer to both cannot score well. When this tour was written, the local model leaned towards finance_accounting even with an empty state. Add your own cases with <code>s1ced-playground --examples my_cases.json</code> and check the header score before relying on any gate.'},
-  {title: '10. Compare with the remote model', spot: '#target', at: AT_MID,
-   text: '<b class="k">Compare both</b> sends the same request to the remote model shown in the picker. Bars sit side by side and each question is marked agree or disagree. The playground asks for your API key and forwards it to the configured provider through this local server.'},
+  {title: '10. Compare models', spot: '#target', at: AT_MID,
+   text: '<b class="k">Compare all</b> sends the same request to every model in the picker: S1-CED, Vega (a second local model that loads on first use) and the remote model, if you have added its API key. Bars sit side by side and each question is marked agree or disagree. Vega also says when it <b class="k">abstains</b>, or when a question looks <b class="k">unbound</b>, outside anything it was trained on.'},
   {title: '11. Take it to code', spot: '#mode', at: AT_RIGHT,
-   text: 'Switch to <b class="k">JSON</b> to copy the state and questions. Send <code>Content-Type: application/json</code> and POST <code>{"target": "local", "request": ..., "include_criteria": false}</code>, matching the criteria checkbox, to <code>/api/decide</code> on this server, or send the same state and questions to OpenRouter\'s <code>/api/alpha/decisions</code>. Both return answers keyed by your question ids.'},
+   text: 'Switch to <b class="k">JSON</b> to copy the state and questions. Send <code>Content-Type: application/json</code> and POST <code>{"target": "local", "request": ..., "include_criteria": false}</code>, matching the criteria checkbox, to <code>/api/decide</code> on this server, or send the same state and questions, plus <code>"model": "jev-latest"</code>, to TypeSafe\'s <code>https://api.typesafe.ai/v1/systemone</code>. Both return answers keyed by your question ids.'},
 ];
 let tourStep = -1, examplesReady = null, tourRevision = 0;
 function clearSpot() { document.querySelectorAll('.spot').forEach(e => e.classList.remove('spot')); }
