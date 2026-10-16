@@ -166,7 +166,7 @@
 <body>
 <div class="app">
   <div class="top">
-    <span class="brand">S1-CED Playground<small>v1.1</small></span>
+    <span class="brand">S1-CED Playground<small>v2.0</small></span>
     <span class="sp"></span>
     <button class="chipbtn dark" id="tourBtn" title="Step-by-step guide using the resume examples">Tutorial</button>
     <span class="status" id="vegaStatus" hidden><i class="dot"></i>vega: not loaded</span>
@@ -207,7 +207,6 @@
         <div class="editor" id="editor"></div>
         <div class="runbar" id="formRunbar">
           <button class="run" id="run">Run decision</button>
-          <label class="check" id="criteriaControl" title="Appends descriptions to the local question"><input type="checkbox" id="inclCrit">criteria text to local</label>
           <span class="kbd">Ctrl+Enter</span>
         </div>
         <div class="err" id="inErr"></div>
@@ -227,7 +226,7 @@
       <div class="body" id="out"><div class="empty"><div><b>Ask a question.<br>Get a probability.</b>Pick a scenario, then Run decision.</div></div></div>
     </div>
   </div>
-  <div class="bar" id="statusBar">Local confidence = top probability. Calibrated weights also provide prediction sets. Compare probabilities across models; confidence measures can differ.</div>
+  <div class="bar" id="statusBar">Every model follows the same contract: the same questions, answers and errors. needs review = the model abstained, called the question out of scope, or kept more than one answer in its prediction set.</div>
 </div>
 
 <div class="tour" id="tour" hidden role="dialog" aria-labelledby="tourTitle">
@@ -444,7 +443,6 @@ $('#state').addEventListener('input', () => { doc.state = parseLoose($('#state')
 
 document.addEventListener('input', e => {
   if (e.target.id === 'state' || e.target.id === 'json') { expected = {}; invalidateResults(); }
-  else if (e.target.id === 'inclCrit') invalidateResults();
   else if (e.target.closest && e.target.closest('#editor') && e.target.id !== 'qid') {
     if (['gth','gpass','gfail'].includes(e.target.id)) {
       if (lastOut) { lastGates = clone(gates); if (validThreshold(gateFor(sel, doc.questions[sel].type).threshold)) renderOut(); else invalidateResults(); }
@@ -454,10 +452,6 @@ document.addEventListener('input', e => {
 });
 
 // ---------------- modes ----------------
-function placeCriteriaControl() {
-  const bar = $(mode === 'form' ? '#formRunbar' : '#jsonRunbar');
-  bar.insertBefore($('#criteriaControl'), bar.querySelector('.kbd'));
-}
 function currentRequest() {
   let r;
   if (mode === 'json') {
@@ -485,7 +479,6 @@ $('#mode').onclick = e => {
     $('#state').value = textOf(doc.state); renderTabs(); renderEditor();
   }
   $('#inErr').textContent = $('#inErr2').textContent = ''; mode = b.dataset.m;
-  placeCriteriaControl();
   document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
   $('#formView').hidden = mode !== 'form'; $('#jsonView').hidden = mode !== 'json';
 };
@@ -508,7 +501,7 @@ $('#outMode').onclick = e => {
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const j = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
-  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j;
+  if (!r.ok) throw new Error((typeof j.error === 'string' && j.error) || j.detail?.message || `HTTP ${r.status}`); return j;
 }
 async function refreshHealth() {
   try {
@@ -557,12 +550,12 @@ async function run() {
   const btns = [$('#run'), $('#run2')]; running = true;
   btns.forEach(b => { b.disabled = true; b.textContent = usesVega(target) && health?.vega?.state === 'loading' ? 'Loading Vega...' : 'Running...'; });
   try {
-    const out = await api('/api/decide', {target, request: req, include_criteria: $('#inclCrit').checked});
+    const out = await api('/api/decide', {target, request: req});
     if (revision !== runRevision) return;
     lastOut = out; lastReq = req; lastExpected = runExpected; lastGates = runGates; lastTarget = runTarget;
     if (out.vega) refreshHealth();
     renderOut();
-    if (out.remote && out.remote.error === 'unauthorized') {
+    if (out.remote && out.remote.status === 401) {
       await refreshHealth();
       if (revision === runRevision && !$('#keyDlg').open) openKey('The remote service rejected the key. Check its access and validity.');
     }
@@ -593,18 +586,20 @@ function gateTag(id, a, type) {
   const ok = v >= g.threshold;
   return `<span class="tag ${ok ? 'pass' : 'fail'}">${esc(ok ? g.pass : g.fail)}</span>`;
 }
+// Every model returns the same uncertainty block; null signals are ones that model does not produce.
+function reviewTag(u) {
+  if (!u || u.needs_review == null) return '';
+  if (!u.needs_review) return '<span class="tag" title="No abstain or out-of-scope signal, and the prediction set has one answer">stands behind it</span>';
+  const why = [u.abstain && 'abstains', u.out_of_scope && 'out of scope', u.prediction_set && u.prediction_set.length !== 1 && `${u.prediction_set.length} in set`].filter(Boolean);
+  return `<span class="tag fail" title="needs_review: the model abstained, called the question out of scope, or could not narrow its prediction set to one answer">needs review: ${esc(why.join(', '))}</span>`;
+}
 function verdict(id, q, a, who, kind) {
   if (!a) return `<span class="tag who">${who}</span><span class="colerr">no answer</span>`;
   let main = q.type === 'noul' ? `p(yes) ${pct(a.noul)}` : q.type === 'choice' ? `${esc(a.choice)}` : `pick ${headline(a, q.type) ?? '-'}; mean ${Number.isFinite(a.score) ? a.score.toFixed(2) : '-'} / ${(q.criteria || []).length - 1}`;
   const bits = [`<span class="tag who"><i class="sw ${kind}" style="display:inline-block;width:9px;height:9px"></i>${who}</span>`, `<span class="tag">${main}</span>`];
   if (a.confidence != null) bits.push(`<span class="tag">conf ${pct(a.confidence)}</span>`);
   bits.push(gateTag(id, a, q.type));
-  if (a.vega) {
-    if (a.vega.abstain) bits.push('<span class="tag fail" title="Confidence is below the floor Vega was calibrated to stand behind">abstain</span>');
-    if (a.vega.unbound) bits.push('<span class="tag fail" title="The answer settled far from every option: likely outside what Vega was trained on">unbound</span>');
-    if (!a.vega.abstain && !a.vega.unbound) bits.push(a.vega.prediction_set && a.vega.prediction_set.length > 1 ? `<span class="tag fail">${a.vega.prediction_set.length} in set</span>` : '<span class="tag">stands behind it</span>');
-  }
-  if (a.local && a.local.should_escalate != null) bits.push(a.local.should_escalate ? `<span class="tag fail">escalate (${a.local.prediction_set.length} in set)</span>` : '<span class="tag">singleton set</span>');
+  bits.push(reviewTag(a.uncertainty));
   if (Object.hasOwn(lastExpected, id)) {
     const ok = expOk(headline(a, q.type), lastExpected[id]);
     bits.push(`<span class="tag ${ok ? 'hit' : 'miss'}">${ok ? 'matches expected' : 'expected ' + esc(expLabel(lastExpected[id]))}</span>`);
@@ -613,13 +608,13 @@ function verdict(id, q, a, who, kind) {
 }
 function legendRow(kind, label, r) {
   if (r.error) {
-    const msg = r.error === 'no_key' ? 'No TypeSafe key set.' : r.error === 'unauthorized' ? 'Remote key rejected: ' + (r.message || '') : r.error === 'local' || String(r.error).startsWith('vega') ? r.message : `${r.error}${r.status ? ' (HTTP ' + r.status + ')' : ''}: ${r.message || ''}`;
+    const msg = `${r.message || r.error}${r.status ? ' (' + r.status + ' ' + r.error + ')' : ''}`;
     return `<div class="lg err"><i class="sw ${kind}"></i><b>${esc(label)}</b><span class="m">${esc(msg)}</span></div>`;
   }
   const m = [];
   if (Number.isFinite(r.latency_ms)) m.push(`${r.latency_ms} ms`);
   if (r.usage && r.usage.input_tokens != null) m.push(`${esc(r.usage.input_tokens)} ${kind === 'local' ? 'state tok' : 'tok'}`);
-  if (Number.isFinite(r.cost_usd_estimate)) m.push(`$${r.cost_usd_estimate.toFixed(6)}`);
+  if (Number.isFinite(r.cost_usd)) m.push(`$${r.cost_usd.toFixed(6)}`);
   return `<div class="lg"><i class="sw ${kind}"></i><b>${esc(label)}</b><span style="color:var(--muted)">${esc(r.model || '')}</span><span class="m">${m.join(' | ')}</span></div>`;
 }
 function renderOut() {
@@ -627,14 +622,13 @@ function renderOut() {
   if (outMode === 'json') { o.innerHTML = `<pre>${esc(JSON.stringify(lastOut, null, 2))}</pre>`; return; }
   const sides = [['local', 'Local', lastOut.local], ['vega', 'Vega', lastOut.vega], ['remote', health?.remote?.model || 'Remote model', lastOut.remote]].filter(s => s[2]);
   const live = sides.filter(s => !s[2].error);
-  if (lastOut.local && lastOut.local.confidence_note) $('#statusBar').textContent = 'Local: ' + lastOut.local.confidence_note + '. Compare model probabilities; confidence measures differ.';
   let h = `<div class="legend">${sides.map(([k, l, r]) => {
     const ids = Object.keys(lastReq.questions).filter(id => Object.hasOwn(lastExpected, id));
     if (r.error || !ids.length) return legendRow(k, l, r);
     const n = ids.filter(id => expOk(headline((r.answers || {})[id], lastReq.questions[id].type), lastExpected[id])).length;
     return legendRow(k, l, r).replace('<span class="m">', `<span class="score">${n}/${ids.length} expected</span><span class="m">`);
   }).join('')}${lastTarget === 'all' && !lastOut.remote ? `<div class="lg"><i class="sw remote"></i><b>${esc(health?.remote?.model || 'Remote model')}</b><span class="m">not run: add a TypeSafe key to include it</span></div>` : ''}</div>`;
-  const warns = (lastOut.local && lastOut.local.warnings) || [];
+  const warns = sides.flatMap(([, label, r]) => (r.warnings || []).map(w => `${label}: ${w}`));
   if (warns.length) h += `<ul class="warns">${warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul>`;
   const cols = `minmax(90px, 1fr) ${live.map(() => 'minmax(120px, 1.3fr)').join(' ')}`;
   for (const [id, q] of Object.entries(lastReq.questions)) {
@@ -700,28 +694,28 @@ const TOUR = [
    text: 'The local model reads a <b class="k">state</b>, answers typed questions about it, and returns a probability for every possible answer. This tour uses two fictional resumes to show how to ask good questions and assess the answers. It takes about two minutes and uses the local model shown in the picker.',
    go: () => { setTarget('local'); loadPreset(presetIdx('Backend engineer, fintech')); }},
   {title: '1. The state', spot: '#state', at: AT_RIGHT,
-   text: () => `The state is everything the model may look at: here a job posting followed by a resume. It can be plain text or a JSON object. The local model reads up to ${health?.local?.max_state_tokens ?? 'its configured limit of'} tokens; anything longer keeps the start and the end, and the result panel warns you.`},
+   text: () => `The state is everything the model may look at: here a job posting followed by a resume. It can be plain text or a JSON object. S1-CED reads up to ${health?.local?.max_state_tokens ?? 'its configured limit of'} tokens. Under the shared rules no model shortens your text silently: a state that is too long gets a clear error from that model instead.`},
   {title: '2. Questions run together', spot: '#qtabs', at: AT_RIGHT,
    text: 'Each tab is one question about the same state. All of them are answered in one pass over the state, so four questions cost little more than one. The id, such as <code>role_family</code>, is for your code; the model never sees it.'},
   {title: '3. Three question types', spot: '#qtabs', at: AT_RIGHT,
    text: '<code>choice</code> picks one option from a list (role_family). <code>noul</code> gives the probability that a statement is true (meets_must_haves, needs_sponsorship). <code>score</code> places the case on ordered levels, lowest first, and returns a weighted position between them (seniority).'},
   {title: '4. Writing options', spot: '#editor', at: AT_RIGHT, go: () => pickTab('role_family'),
-   text: () => `Give options short, distinct names; the local model compares those names against the state. The remote model reads descriptions; the local model reads them if you tick <b class="k">criteria text to local</b>. The local model accepts 2 to ${health?.local?.max_options ?? 'its configured maximum of'} options per question.`},
+   text: () => `Give options short, distinct names and, where it helps, a description. Every model reads both names and descriptions. S1-CED accepts 2 to ${health?.local?.max_options ?? 'its configured maximum of'} options per question; the shared limit is 255.`},
   {title: '5. Gates turn probabilities into actions', spot: '#editor .gate', at: AT_RIGHT, go: () => pickTab('meets_must_haves'),
    text: 'A gate is your policy, not the model\'s: shortlist when p(yes) is at least 0.7, otherwise send the resume to a recruiter. Gates are never sent to the model, so you can change a threshold without changing the question.'},
   {title: '6. Run it', spot: '#out', at: AT_LEFT, go: () => run(),
    text: 'Run decision (or Ctrl+Enter). Every option gets a bar; the bold row is the model\'s pick and the dashed <b class="k">expected</b> tag marks the answer written for this example. The header counts how many selected levels matched. Score questions also show a weighted mean, which may differ from the selected level.'},
   {title: '7. Two signals to read', spot: '#out', at: AT_LEFT,
-   text: 'Under each question you get the gate result. Calibrated weights also return a prediction set: <b class="k">escalate</b> means the set has zero or multiple answers; <b class="k">singleton set</b> means one answer survived. A singleton can still fail your gate or be wrong. Weights without matching calibration have no prediction sets.'},
+   text: 'Under each question you get the gate result, which is your policy, and the model\'s own signal, which follows one rule for every model: <b class="k">needs review</b> when the model abstains, calls the question out of scope, or keeps more than one answer in its prediction set; <b class="k">stands behind it</b> otherwise. A model with none of these signals, such as Jev, shows neither. A model that stands behind an answer can still be wrong.'},
   {title: '8. When confidence lies', spot: '#out', at: AT_LEFT,
    go: async () => { setTarget('local'); loadPreset(presetIdx('Registered nurse, hospital')); await run(); },
-   text: 'Now the nurse applying for an ICU job she is not qualified for. Compare the selected answers with the expected tags and check the gate and escalation signals separately. This release has made confident mistakes on this example; the displayed result depends on your weights and the criteria checkbox. Calibration on policy-rule cases does not establish reliability on resumes.'},
+   text: 'Now the nurse applying for an ICU job she is not qualified for. Compare the selected answers with the expected tags and check the gate and the review signal separately. This release has made confident mistakes on this example; the displayed result depends on your weights. Calibration on policy-rule cases does not establish reliability on resumes.'},
   {title: '9. Measure before you trust a gate', spot: '#presets', at: AT_MID,
    text: 'That is why every example carries expected answers, and why each use-case group pairs a positive case with a contrasting one: a model that gives the same answer to both cannot score well. When this tour was written, the local model leaned towards finance_accounting even with an empty state. Add your own cases with <code>s1ced-playground --examples my_cases.json</code> and check the header score before relying on any gate.'},
   {title: '10. Compare models', spot: '#target', at: AT_MID,
    text: '<b class="k">Compare all</b> sends the same request to every model in the picker: S1-CED, Vega (a second local model that loads on first use) and the remote model, if you have added its API key. Bars sit side by side and each question is marked agree or disagree. Vega also says when it <b class="k">abstains</b>, or when a question looks <b class="k">unbound</b>, outside anything it was trained on.'},
   {title: '11. Take it to code', spot: '#mode', at: AT_RIGHT,
-   text: 'Switch to <b class="k">JSON</b> to copy the state and questions. Send <code>Content-Type: application/json</code> and POST <code>{"target": "local", "request": ..., "include_criteria": false}</code>, matching the criteria checkbox, to <code>/api/decide</code> on this server, or send the same state and questions, plus <code>"model": "jev-latest"</code>, to TypeSafe\'s <code>https://api.typesafe.ai/v1/systemone</code>. Both return answers keyed by your question ids.'},
+   text: 'Switch to <b class="k">JSON</b> to copy the state and questions. Add <code>"model": "s1ced"</code>, <code>"vega-0.8b"</code> or <code>"jev-latest"</code> and POST it to <code>/v1/systemone</code> on this server. That is TypeSafe\'s own API, so the same code also works against <code>https://api.typesafe.ai</code>, and TypeSafe\'s SDKs work here with <code>base_url</code> set to this address.'},
 ];
 let tourStep = -1, examplesReady = null, tourRevision = 0;
 function clearSpot() { document.querySelectorAll('.spot').forEach(e => e.classList.remove('spot')); }
@@ -747,7 +741,6 @@ async function startTour() {
   }
   // The walkthrough starts from a known editor state, even after invalid JSON input.
   mode = 'form'; outMode = 'preview';
-  placeCriteriaControl();
   $('#formView').hidden = false; $('#jsonView').hidden = true;
   document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x.dataset.m === mode));
   document.querySelectorAll('#outMode button').forEach(x => x.classList.toggle('on', x.dataset.o === outMode));

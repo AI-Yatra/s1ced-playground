@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "s1ced"
-version = "1.1.0"
+version = "2.0.0"
 description = "S1-CED decision model and playground: calibrated yes/no, choice and score decisions, with Vega and Jev to compare"
 readme = "README.md"
 license = "Apache-2.0"

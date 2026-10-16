@@ -64,39 +64,41 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "role_family": {
             "type": "choice",
-            "choice": "finance_accounting",
+            "choice": "software_engineering",
             "probabilities": {
-              "software_engineering": 0.1611,
-              "nursing": 0.2676,
-              "finance_accounting": 0.3448,
-              "marketing": 0.0401,
-              "logistics_operations": 0.0876,
-              "teaching": 0.0988
+              "software_engineering": 0.255,
+              "nursing": 0.1608,
+              "finance_accounting": 0.2012,
+              "marketing": 0.0788,
+              "logistics_operations": 0.1876,
+              "teaching": 0.1165
             },
-            "confidence": 0.3448,
-            "local": {
-              "top_prob": 0.3448,
+            "confidence": 0.255,
+            "uncertainty": {
               "prediction_set": [
-                "nursing",
+                "software_engineering",
                 "finance_accounting"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "meets_must_haves": {
             "type": "noul",
-            "noul": 0.5176,
-            "local": {
-              "top_prob": 0.5176,
+            "noul": 0.3926,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "seniority": {
@@ -115,35 +117,36 @@
               "3": 0.1818
             },
             "confidence": 0.45,
-            "local": {
-              "top_prob": 0.45,
+            "uncertainty": {
               "prediction_set": [
-                "Entry level, 0 to 2 years",
-                "Mid level, 3 to 5 years"
+                "0",
+                "1"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "needs_sponsorship": {
             "type": "noul",
-            "noul": 0.504,
-            "local": {
-              "top_prob": 0.504,
+            "noul": 0.4455,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 195,
           "output_tokens": 0
         },
-        "latency_ms": 163.4,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 335.5
       }
     }
   },
@@ -212,37 +215,41 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "role_family": {
             "type": "choice",
             "choice": "finance_accounting",
             "probabilities": {
-              "software_engineering": 0.0942,
-              "nursing": 0.0192,
-              "finance_accounting": 0.8158,
-              "marketing": 0.0106,
-              "logistics_operations": 0.0445,
-              "teaching": 0.0158
+              "software_engineering": 0.2105,
+              "nursing": 0.1045,
+              "finance_accounting": 0.4121,
+              "marketing": 0.0637,
+              "logistics_operations": 0.1361,
+              "teaching": 0.073
             },
-            "confidence": 0.8158,
-            "local": {
-              "top_prob": 0.8158,
+            "confidence": 0.4121,
+            "uncertainty": {
               "prediction_set": [
+                "software_engineering",
                 "finance_accounting"
               ],
-              "should_escalate": false
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "meets_must_haves": {
             "type": "noul",
-            "noul": 0.8068,
-            "local": {
-              "top_prob": 0.8068,
+            "noul": 0.6302,
+            "uncertainty": {
               "prediction_set": [
+                "no",
                 "yes"
               ],
-              "should_escalate": false
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "seniority": {
@@ -261,35 +268,36 @@
               "3": 0.099
             },
             "confidence": 0.5647,
-            "local": {
-              "top_prob": 0.5647,
+            "uncertainty": {
               "prediction_set": [
-                "Entry level, 0 to 2 years",
-                "Mid level, 3 to 5 years"
+                "0",
+                "1"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "needs_sponsorship": {
             "type": "noul",
-            "noul": 0.7823,
-            "local": {
-              "top_prob": 0.7823,
+            "noul": 0.6477,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 208,
           "output_tokens": 0
         },
-        "latency_ms": 152.3,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 291.3
       }
     }
   },
@@ -346,26 +354,27 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "source_type": {
             "type": "choice",
-            "choice": "trusted",
+            "choice": "untrusted",
             "probabilities": {
-              "trusted": 0.4029,
-              "untrusted": 0.2402,
-              "quoted": 0.1587,
-              "unknown": 0.1982
+              "trusted": 0.2523,
+              "untrusted": 0.2905,
+              "quoted": 0.1915,
+              "unknown": 0.2657
             },
-            "confidence": 0.4029,
-            "local": {
-              "top_prob": 0.4029,
+            "confidence": 0.2905,
+            "uncertainty": {
               "prediction_set": [
                 "trusted",
                 "untrusted",
                 "unknown"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "injection_risk": {
@@ -386,36 +395,37 @@
               "4": 0.1995
             },
             "confidence": 0.4157,
-            "local": {
-              "top_prob": 0.4157,
+            "uncertainty": {
               "prediction_set": [
-                "low",
-                "moderate",
-                "critical"
+                "1",
+                "2",
+                "4"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "overrides_instructions": {
             "type": "noul",
-            "noul": 0.6025,
-            "local": {
-              "top_prob": 0.6025,
+            "noul": 0.5098,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 69,
           "output_tokens": 0
         },
-        "latency_ms": 93.4,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 143.0
       }
     }
   },
@@ -472,26 +482,27 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "source_type": {
             "type": "choice",
-            "choice": "trusted",
+            "choice": "untrusted",
             "probabilities": {
-              "trusted": 0.3398,
-              "untrusted": 0.1926,
-              "quoted": 0.2184,
-              "unknown": 0.2492
+              "trusted": 0.2648,
+              "untrusted": 0.3018,
+              "quoted": 0.1652,
+              "unknown": 0.2682
             },
-            "confidence": 0.3398,
-            "local": {
-              "top_prob": 0.3398,
+            "confidence": 0.3018,
+            "uncertainty": {
               "prediction_set": [
                 "trusted",
-                "quoted",
+                "untrusted",
                 "unknown"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "injection_risk": {
@@ -512,35 +523,36 @@
               "4": 0.1363
             },
             "confidence": 0.451,
-            "local": {
-              "top_prob": 0.451,
+            "uncertainty": {
               "prediction_set": [
-                "low",
-                "moderate"
+                "1",
+                "2"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "overrides_instructions": {
             "type": "noul",
-            "noul": 0.7136,
-            "local": {
-              "top_prob": 0.7136,
+            "noul": 0.5389,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 55,
           "output_tokens": 0
         },
-        "latency_ms": 92.3,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 142.8
       }
     }
   },
@@ -597,25 +609,27 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "email_type": {
             "type": "choice",
             "choice": "phishing",
             "probabilities": {
-              "phishing": 0.6085,
-              "spam": 0.1232,
-              "legitimate": 0.0187,
-              "unknown": 0.2496
+              "phishing": 0.4389,
+              "spam": 0.2044,
+              "legitimate": 0.1259,
+              "unknown": 0.2308
             },
-            "confidence": 0.6085,
-            "local": {
-              "top_prob": 0.6085,
+            "confidence": 0.4389,
+            "uncertainty": {
               "prediction_set": [
                 "phishing",
+                "spam",
                 "unknown"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "malicious_intent": {
@@ -636,35 +650,36 @@
               "4": 0.2882
             },
             "confidence": 0.2882,
-            "local": {
-              "top_prob": 0.2882,
+            "uncertainty": {
               "prediction_set": [
-                "low",
-                "critical"
+                "1",
+                "4"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "quarantine": {
             "type": "noul",
-            "noul": 0.5443,
-            "local": {
-              "top_prob": 0.5443,
+            "noul": 0.5112,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 89,
           "output_tokens": 0
         },
-        "latency_ms": 88.2,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 112.2
       }
     }
   },
@@ -721,25 +736,26 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "email_type": {
             "type": "choice",
             "choice": "phishing",
             "probabilities": {
-              "phishing": 0.5951,
-              "spam": 0.1196,
-              "legitimate": 0.0275,
-              "unknown": 0.2578
+              "phishing": 0.4779,
+              "spam": 0.1826,
+              "legitimate": 0.094,
+              "unknown": 0.2454
             },
-            "confidence": 0.5951,
-            "local": {
-              "top_prob": 0.5951,
+            "confidence": 0.4779,
+            "uncertainty": {
               "prediction_set": [
                 "phishing",
                 "unknown"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "malicious_intent": {
@@ -760,36 +776,37 @@
               "4": 0.2279
             },
             "confidence": 0.2288,
-            "local": {
-              "top_prob": 0.2288,
+            "uncertainty": {
               "prediction_set": [
-                "low",
-                "high",
-                "critical"
+                "1",
+                "3",
+                "4"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "quarantine": {
             "type": "noul",
-            "noul": 0.5545,
-            "local": {
-              "top_prob": 0.5545,
+            "noul": 0.5078,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 84,
           "output_tokens": 0
         },
-        "latency_ms": 83.5,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 116.7
       }
     }
   },
@@ -846,25 +863,28 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "priority": {
             "type": "choice",
-            "choice": "p1",
+            "choice": "p4",
             "probabilities": {
-              "p1": 0.3555,
-              "p2": 0.1698,
-              "p3": 0.1899,
-              "p4": 0.2848
+              "p1": 0.2446,
+              "p2": 0.2359,
+              "p3": 0.2365,
+              "p4": 0.2831
             },
-            "confidence": 0.3555,
-            "local": {
-              "top_prob": 0.3555,
+            "confidence": 0.2831,
+            "uncertainty": {
               "prediction_set": [
                 "p1",
+                "p2",
+                "p3",
                 "p4"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "criticality": {
@@ -885,37 +905,38 @@
               "4": 0.2385
             },
             "confidence": 0.2532,
-            "local": {
-              "top_prob": 0.2532,
+            "uncertainty": {
               "prediction_set": [
-                "low",
-                "moderate",
-                "high",
-                "critical"
+                "1",
+                "2",
+                "3",
+                "4"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "many_blocked": {
             "type": "noul",
-            "noul": 0.6651,
-            "local": {
-              "top_prob": 0.6651,
+            "noul": 0.5664,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 48,
           "output_tokens": 0
         },
-        "latency_ms": 83.5,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 99.4
       }
     }
   },
@@ -972,26 +993,28 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "priority": {
             "type": "choice",
-            "choice": "p3",
+            "choice": "p1",
             "probabilities": {
-              "p1": 0.207,
-              "p2": 0.2132,
-              "p3": 0.4384,
-              "p4": 0.1413
+              "p1": 0.2678,
+              "p2": 0.2663,
+              "p3": 0.2408,
+              "p4": 0.225
             },
-            "confidence": 0.4384,
-            "local": {
-              "top_prob": 0.4384,
+            "confidence": 0.2678,
+            "uncertainty": {
               "prediction_set": [
                 "p1",
                 "p2",
-                "p3"
+                "p3",
+                "p4"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "criticality": {
@@ -1012,35 +1035,36 @@
               "4": 0.2627
             },
             "confidence": 0.3432,
-            "local": {
-              "top_prob": 0.3432,
+            "uncertainty": {
               "prediction_set": [
-                "low",
-                "critical"
+                "1",
+                "4"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "many_blocked": {
             "type": "noul",
-            "noul": 0.5842,
-            "local": {
-              "top_prob": 0.5842,
+            "noul": 0.5152,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 42,
           "output_tokens": 0
         },
-        "latency_ms": 72.4,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 107.3
       }
     }
   },
@@ -1097,25 +1121,28 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "refund_decision": {
             "type": "choice",
             "choice": "standard",
             "probabilities": {
-              "standard": 0.5255,
-              "exception": 0.0814,
-              "reject": 0.1226,
-              "unknown": 0.2705
+              "standard": 0.3362,
+              "exception": 0.2036,
+              "reject": 0.2477,
+              "unknown": 0.2124
             },
-            "confidence": 0.5255,
-            "local": {
-              "top_prob": 0.5255,
+            "confidence": 0.3362,
+            "uncertainty": {
               "prediction_set": [
                 "standard",
+                "exception",
+                "reject",
                 "unknown"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "customer_impact": {
@@ -1136,36 +1163,37 @@
               "4": 0.3102
             },
             "confidence": 0.3102,
-            "local": {
-              "top_prob": 0.3102,
+            "uncertainty": {
               "prediction_set": [
-                "low",
-                "moderate",
-                "critical"
+                "1",
+                "2",
+                "4"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "outage_evidence": {
             "type": "noul",
-            "noul": 0.4361,
-            "local": {
-              "top_prob": 0.5639,
+            "noul": 0.3256,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 69,
           "output_tokens": 0
         },
-        "latency_ms": 75.1,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 158.4
       }
     }
   },
@@ -1222,25 +1250,27 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "refund_decision": {
             "type": "choice",
             "choice": "standard",
             "probabilities": {
-              "standard": 0.5504,
-              "exception": 0.1341,
-              "reject": 0.037,
-              "unknown": 0.2785
+              "standard": 0.3752,
+              "exception": 0.1702,
+              "reject": 0.2085,
+              "unknown": 0.2461
             },
-            "confidence": 0.5504,
-            "local": {
-              "top_prob": 0.5504,
+            "confidence": 0.3752,
+            "uncertainty": {
               "prediction_set": [
                 "standard",
+                "reject",
                 "unknown"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "customer_impact": {
@@ -1261,35 +1291,36 @@
               "4": 0.3338
             },
             "confidence": 0.3338,
-            "local": {
-              "top_prob": 0.3338,
+            "uncertainty": {
               "prediction_set": [
-                "moderate",
-                "critical"
+                "2",
+                "4"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "outage_evidence": {
             "type": "noul",
-            "noul": 0.3619,
-            "local": {
-              "top_prob": 0.6381,
+            "noul": 0.4361,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 71,
           "output_tokens": 0
         },
-        "latency_ms": 73.5,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 108.0
       }
     }
   },
@@ -1346,26 +1377,28 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "release_decision": {
             "type": "choice",
             "choice": "go",
             "probabilities": {
-              "go": 0.4333,
-              "hold": 0.2287,
-              "rollback": 0.2918,
-              "review": 0.0462
+              "go": 0.2849,
+              "hold": 0.2775,
+              "rollback": 0.2159,
+              "review": 0.2217
             },
-            "confidence": 0.4333,
-            "local": {
-              "top_prob": 0.4333,
+            "confidence": 0.2849,
+            "uncertainty": {
               "prediction_set": [
                 "go",
                 "hold",
-                "rollback"
+                "rollback",
+                "review"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "release_risk": {
@@ -1386,35 +1419,36 @@
               "4": 0.3013
             },
             "confidence": 0.3013,
-            "local": {
-              "top_prob": 0.3013,
+            "uncertainty": {
               "prediction_set": [
-                "low",
-                "critical"
+                "1",
+                "4"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "stop_condition": {
             "type": "noul",
-            "noul": 0.3903,
-            "local": {
-              "top_prob": 0.6097,
+            "noul": 0.461,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 77,
           "output_tokens": 0
         },
-        "latency_ms": 78.0,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 176.8
       }
     }
   },
@@ -1471,24 +1505,27 @@
     },
     "out": {
       "local": {
-        "model": "s1ced/s1ced_v3_deep (deep_fusion, cpu)",
+        "model": "s1ced-v3-deep",
         "answers": {
           "release_decision": {
             "type": "choice",
             "choice": "hold",
             "probabilities": {
-              "go": 0.1203,
-              "hold": 0.8004,
-              "rollback": 0.0222,
-              "review": 0.0571
+              "go": 0.2697,
+              "hold": 0.3381,
+              "rollback": 0.1685,
+              "review": 0.2236
             },
-            "confidence": 0.8004,
-            "local": {
-              "top_prob": 0.8004,
+            "confidence": 0.3381,
+            "uncertainty": {
               "prediction_set": [
-                "hold"
+                "go",
+                "hold",
+                "review"
               ],
-              "should_escalate": false
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           },
           "release_risk": {
@@ -1509,34 +1546,35 @@
               "4": 0.0581
             },
             "confidence": 0.6267,
-            "local": {
-              "top_prob": 0.6267,
+            "uncertainty": {
               "prediction_set": [
-                "none or negligible"
+                "0"
               ],
-              "should_escalate": false
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": false
             }
           },
           "stop_condition": {
             "type": "noul",
-            "noul": 0.4497,
-            "local": {
-              "top_prob": 0.5503,
+            "noul": 0.4876,
+            "uncertainty": {
               "prediction_set": [
                 "no",
                 "yes"
               ],
-              "should_escalate": true
+              "abstain": null,
+              "out_of_scope": null,
+              "needs_review": true
             }
           }
         },
+        "warnings": [],
         "usage": {
           "input_tokens": 86,
           "output_tokens": 0
         },
-        "latency_ms": 81.4,
-        "warnings": [],
-        "confidence_note": "confidence = top probability; escalate when the conformal set (p >= 0.198) is not a single option"
+        "latency_ms": 161.0
       }
     }
   }
