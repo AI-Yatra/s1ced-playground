@@ -30,9 +30,10 @@ class DecisionError(Exception):
     """A contract error. status follows the TypeSafe API: 400 limits, 401 key, 404 model, 422 invalid request,
     429 rate limit, 502 upstream or invalid model output, 503 model still loading."""
 
-    def __init__(self, status, error_type, message, loc=None):
+    def __init__(self, status, error_type, message, loc=None, retry_after=None):
         super().__init__(message)
         self.status, self.error_type, self.message, self.loc = status, error_type, message, loc
+        self.retry_after = retry_after   # seconds, sent as a Retry-After header so SDKs wait and retry
 
     def body(self):
         d = {'error_type': self.error_type, 'message': self.message}

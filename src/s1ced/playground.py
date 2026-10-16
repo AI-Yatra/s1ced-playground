@@ -140,12 +140,14 @@ def make_handler(reg, keys, a):
     class H(BaseHTTPRequestHandler):
         def log_message(self, *x): pass
 
-        def _json(self, code, obj):
+        def _json(self, code, obj, headers=None):
             body = json.dumps(obj).encode(); self.send_response(code)
             self.send_header('Content-Type', 'application/json'); self.send_header('Content-Length', str(len(body)))
+            for k, v in (headers or {}).items(): self.send_header(k, v)
             self.send_header('Cache-Control', 'no-store'); self.end_headers(); self.wfile.write(body)
 
-        def _error(self, e): self._json(e.status, e.body())
+        def _error(self, e):
+            self._json(e.status, e.body(), {'Retry-After': str(e.retry_after)} if getattr(e, 'retry_after', None) else None)
 
         def _trusted(self):
             # only local clients may call: blocks DNS rebinding (Host) and cross-site posts (Origin, JSON content type)
@@ -200,8 +202,9 @@ def make_handler(reg, keys, a):
                 try:
                     req = check_request(body)
                     m = self._model(req['model'])
-                    if m.name == canonical(req['model']) or isinstance(m, JevModel): return self._json(200, m.run(req))
-                    out = m.run({**req, 'model': m.name})   # --jev-fallback: answered locally, and the response says so
+                    # API clients get 503 + Retry-After while a model loads, instead of a request held open for minutes
+                    if m.name == canonical(req['model']) or isinstance(m, JevModel): return self._json(200, m.run(req, wait=False))
+                    out = m.run({**req, 'model': m.name}, wait=False)   # --jev-fallback: answered locally, and the response says so
                     out['warnings'].append(f'No TypeSafe key, so this {req["model"]} request was answered by {m.name} (--jev-fallback).')
                     self._json(200, out)
                 except DecisionError as e: self._error(e)

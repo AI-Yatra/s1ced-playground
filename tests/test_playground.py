@@ -25,7 +25,7 @@ class HandlerTests(unittest.TestCase):
         h = object.__new__(app.make_handler(self.reg, keys, a))
         h.path, h.command = path, method
         h.headers = {'Host': '127.0.0.1:8770', 'Content-Type': 'application/json', 'Content-Length': str(len(body)), **(headers or {})}
-        h.rfile = io.BytesIO(body); h._json = lambda code, obj: setattr(h, 'response', (code, obj))
+        h.rfile = io.BytesIO(body); h._json = lambda code, obj, headers=None: setattr(h, 'response', (code, obj))
         return h
 
     def post(self, obj, path="/v1/systemone", **kw):
@@ -91,6 +91,15 @@ class HandlerTests(unittest.TestCase):
         body = compress(json.dumps({**copy(REQUEST), 'model': 's1ced'}).encode())
         h = self.handler(body, '/v1/systemone', headers={'Content-Encoding': 'zstd'}); h.do_POST()
         self.assertEqual(h.response[0], 200)
+
+    def test_loading_model_answers_503_with_retry_after_at_once(self):
+        loading = models.VegaModel('vega-0.8b'); loading.state = 'loading'; loading.ready.clear()
+        self.reg.models['vega-0.8b'] = loading
+        sent = {}
+        h = self.handler(json.dumps({**copy(REQUEST), 'model': 'vega-0.8b'}).encode(), '/v1/systemone')
+        h._json = lambda code, obj, headers=None: sent.update(code=code, obj=obj, headers=headers)
+        h.do_POST()
+        self.assertEqual((sent['code'], sent['obj']['detail']['error_type'], sent['headers']), (503, 'model_loading', {'Retry-After': '10'}))
 
     def test_v1_models_lists_every_model(self):
         h = self.handler(path='/v1/models', method='GET'); h.do_GET()
