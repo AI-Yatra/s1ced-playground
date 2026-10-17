@@ -218,6 +218,40 @@
           "expected": {"release_decision": "go", "release_risk": [0, 1], "stop_condition": "no"}
         }
       ]
+    },
+    {
+      "name": "Terraform change risk scorer",
+      "note": "From System_One_Use_Cases.xlsx (DevOps and SRE). The playground uses Vega 0.8 to classify a Terraform plan, rate its severity and flag destructive production actions. The terraform-risk command runs the same three questions over `terraform show -json` output. Second case is a contrasting example written for testing.",
+      "questions": {
+        "change_class": {
+          "type": "choice",
+          "instructions": "Which option best describes this case: Terraform change risk scorer?",
+          "criteria": {"safe": "Non-destructive change", "recreate": "Resource recreation", "network": "Critical network change", "destroy": "Destructive removal"}
+        },
+        "severity": {
+          "type": "score",
+          "instructions": "Rate the infrastructure change severity in the supplied state.",
+          "criteria": ["none or negligible", "low", "moderate", "high", "critical"]
+        },
+        "destructive_prod": {
+          "type": "noul",
+          "instructions": "Does the plan contain destructive production actions?",
+          "criteria": {"true": "A production resource is deleted or replaced", "false": "No production resource is deleted or replaced"}
+        }
+      },
+      "gates": {"destructive_prod": {"threshold": 0.5, "pass": "Require a human approval gate", "fail": "Auto-approve"}},
+      "items": [
+        {
+          "name": "Internet gateway removed, production database subnet recreated",
+          "state": "Terraform plan (aws provider)\nWorkspace: production\nResource changes:\n1. module.network.aws_internet_gateway.main (aws_internet_gateway): delete. Tags: Environment=production, Name=prod-igw.\n2. module.data.aws_subnet.db (aws_subnet): replace (destroy then create). Tags: Environment=production, Name=production-database-subnet. CIDR block 10.0.2.0/24.\n3. module.data.aws_db_subnet_group.main (aws_db_subnet_group): replace. Tags: Environment=production.",
+          "expected": {"change_class": "network", "severity": [3, 4], "destructive_prod": "yes"}
+        },
+        {
+          "name": "Tag-only change on a staging bucket",
+          "state": "Terraform plan (aws provider)\nWorkspace: staging\nResource changes:\n1. module.assets.aws_s3_bucket.logs (aws_s3_bucket): update. Tags: Environment=staging, Owner=platform. Only the tags changed; nothing is destroyed or replaced.",
+          "expected": {"change_class": "safe", "severity": [0, 1], "destructive_prod": "no"}
+        }
+      ]
     }
   ]
 }
