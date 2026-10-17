@@ -87,6 +87,28 @@ It is bigger and slower to start than S1-CED, so it only loads when you pick **V
 
 Options: `--vega-model 4b` for the larger version, `--vega-device cpu` to keep it off the GPU, `--vega-preload` to load it at startup, and `--no-vega` to hide it.
 
+## Terraform change risk scorer (Vega 0.8)
+
+The `terraform-risk` command applies Vega to a Terraform plan. It scans the plan for destroy,
+replace and network changes, then asks Vega three questions: how to classify the change, how severe
+it is, and whether the plan destroys production. A production delete or replace, an internet gateway
+removal, a production database subnet recreation, a high severity score, a destructive
+classification or model uncertainty each require a human approval.
+
+```bash
+terraform show -json plan.out > plan.json
+terraform-risk plan.json                    # a report; a human must approve (exit code 2)
+terraform-risk plan.json --format json      # the same report as JSON for CI
+terraform-risk plan.json --model s1ced      # the faster local model instead of Vega
+terraform-risk - < plan.txt                 # the text of `terraform plan` works too
+```
+
+The report has the gate, the three answers with their probabilities, the plan scan and the reasons a
+human is needed. Exit codes make it a CI gate: `0` auto-approved, `2` human approval required, `1`
+invalid input or a model error. `--production` treats every resource as production; by default it is
+inferred from addresses, tags, plan variables and the workspace. The same scenario is in the
+playground sidebar under **Terraform change risk scorer**.
+
 ## Optional: compare with Jev
 
 The playground can send the same question to [Jev](https://docs.typesafe.ai/models), TypeSafe's hosted decision model, and show both answers side by side. Jev takes the same request shape as the playground, so nothing needs converting. This needs a TypeSafe API key from the [TypeSafe console](https://console.typesafe.ai), and TypeSafe charges per input token ($0.042 per million at the time of writing; output is free). S1-CED and Vega are local and free.

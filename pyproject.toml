@@ -34,6 +34,7 @@ Model = "https://huggingface.co/syedazeez/s1ced-v3-deep"
 [project.scripts]
 s1ced-playground = "s1ced.playground:main"
 s1ced = "s1ced.infer:main"
+terraform-risk = "s1ced.terraform_risk:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/s1ced"]
